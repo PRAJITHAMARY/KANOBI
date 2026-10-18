@@ -23,6 +23,19 @@ Frontend (`cd frontend-service`):
 - `npm run test:e2e`: Playwright flows against the Docker stack (see "E2E tests"). Also `test:e2e:ui` and `test:e2e:report`.
 - Installs need `legacy-peer-deps` (set in `.npmrc`) because `swagger-ui-react` declares support only for React below 19.
 
+## Git and GitHub (mandatory)
+
+- **Never push without asking first.** This applies to every branch, including feature branches with an open PR. Commit locally, then stop and ask (e.g. "Push these 2 commits to `feat/x` / PR #5?"). One approval covers one push.
+- **Never commit or push to `main` directly.** Changes reach `main` only through a pull request that the user reviews and merges. Before committing, check the current branch (`git branch --show-current`). If it is `main`, create a feature branch first.
+- **Ask before any other action that changes GitHub:**
+  - creating or editing a PR (title, description, base branch, labels)
+  - merging, closing or re-targeting a PR
+  - triggering, re-running or cancelling a workflow run
+  - creating or deleting remote branches, tags or releases
+- **No approval needed for read-only actions:** viewing PRs, checks, run logs and artifacts.
+- **Stacked PRs:** when the base PR merges first, the stacked PR is not re-targeted to `main` automatically if it is merged after that. Check the base branch before asking to merge it.
+- **If something was pushed or changed on GitHub without approval, say so immediately and plainly.** Include the commit or run and the branch, then ask how to fix it. Don't rewrite pushed history or force-push to clean it up.
+
 ## Local environment (Docker)
 
 `docker compose up --build` from the repo root starts:
