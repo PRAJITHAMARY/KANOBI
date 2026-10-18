@@ -37,6 +37,16 @@ describe("ProjectCard", () => {
     expect(await screen.findByText("details page")).toBeInTheDocument();
   });
 
+  it("exposes the edit and delete icons as named buttons", async () => {
+    renderCard();
+
+    expect(screen.getByTestId("project-card")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Edit project" }));
+    expect(screen.getByRole("heading", { name: "Edit Project" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Delete project" }));
+    expect(screen.getByRole("heading", { name: "Delete Shop" })).toBeInTheDocument();
+  });
+
   it("edits the project and closes the dialog on success", async () => {
     const { icon, submissions } = renderCard();
 

@@ -278,6 +278,25 @@ describe("saving changes", () => {
     expect(user.getByRole("button", { name: "Push Update" })).toBeDisabled();
   });
 
+  // Found by the e2e suite: models that never had relations have no relations
+  // array, and pushing them threw before the relations POST and the reload.
+  it("pushes a model without a relations array and reloads", async () => {
+    const fetchMock = stubFetch();
+    const { card } = renderManager();
+    const tag = within(card("Tag"));
+
+    await userEvent.click(tag.getByRole("button", { name: "+ Add Property" }));
+    await userEvent.click(tag.getByRole("button", { name: "Push Update" }));
+
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(sentBody(fetchMock, `${API}/model/p1/m3`, "PUT").properties).toEqual([
+      { name: "", type: "string", required: false },
+    ]);
+    expect(sentBody(fetchMock, `${API}/model-relations/p1/m3`, "POST")).toEqual({
+      relations: [],
+    });
+  });
+
   it.each([
     ["the model update", `${API}/model/p1/m1`],
     ["the API update", `${API}/model-api/p1/m1`],

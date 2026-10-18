@@ -16,13 +16,20 @@ export default function ProjectCard({ project }: { project: any }) {
   }, [actionData]);
 
   return (
-    <div className="p-4 pt-0.5 pr-0.5 border shadow transition bg-gray-600">
+    <div
+      data-testid="project-card"
+      className="p-4 pt-0.5 pr-0.5 border shadow transition bg-gray-600"
+    >
       <div className="ml-auto flex">
         <ClipboardPen
+          role="button"
+          aria-label="Edit project"
           className="text-blue-500 ml-auto cursor-pointer"
           onClick={() => setOpenEdit(true)}
         />
         <X
+          role="button"
+          aria-label="Delete project"
           className="text-red-600 ml-2 cursor-pointer"
           onClick={() => setOpen(true)}
         />
