@@ -20,7 +20,21 @@ Backend (`cd backend-service`):
 Frontend (`cd frontend-service`):
 - `npm run dev` / `npm run build` (`tsc -b && vite build`) / `npm run lint` / `npm run preview`
 - `npm test` / `npm run test:coverage`
+- `npm run test:e2e`: Playwright flows against the Docker stack (see "E2E tests"). Also `test:e2e:ui` and `test:e2e:report`.
 - Installs need `legacy-peer-deps` (set in `.npmrc`) because `swagger-ui-react` declares support only for React below 19.
+
+## Git and GitHub (mandatory)
+
+- **Never push without asking first.** This applies to every branch, including feature branches with an open PR. Commit locally, then stop and ask (e.g. "Push these 2 commits to `feat/x` / PR #5?"). One approval covers one push.
+- **Never commit or push to `main` directly.** Changes reach `main` only through a pull request that the user reviews and merges. Before committing, check the current branch (`git branch --show-current`). If it is `main`, create a feature branch first.
+- **Ask before any other action that changes GitHub:**
+  - creating or editing a PR (title, description, base branch, labels)
+  - merging, closing or re-targeting a PR
+  - triggering, re-running or cancelling a workflow run
+  - creating or deleting remote branches, tags or releases
+- **No approval needed for read-only actions:** viewing PRs, checks, run logs and artifacts.
+- **Stacked PRs:** when the base PR merges first, the stacked PR is not re-targeted to `main` automatically if it is merged after that. Check the base branch before asking to merge it.
+- **If something was pushed or changed on GitHub without approval, say so immediately and plainly.** Include the commit or run and the branch, then ask how to fix it. Don't rewrite pushed history or force-push to clean it up.
 
 ## Local environment (Docker)
 
@@ -46,27 +60,47 @@ Both packages use Vitest with v8 coverage and enforce a **100% threshold** on li
 - Frontend tests sit next to the code they cover (`*.test.tsx`), with jsdom and Testing Library. Render route components through `renderWithRouter` (`src/test/utils.tsx`) with a stub loader/action, and stub `fetch` (and `location` for `reload`) with `vi.stubGlobal`.
 - Truly unreachable guards are excluded with `/* v8 ignore if -- @preserve */` (the `@preserve` is required so the TS transform keeps the comment). Known bugs, including the ones those hints cover, are tracked in `TODO.md`.
 
-CI (`.github/workflows/ci.yml`) runs on pushes to `main` and on PRs, with Node 22. It has one job per package:
+### E2E tests (Playwright)
+
+- **What they cover:** user flows through the real app (UI → API → LocalStack), not units. They live in `frontend-service/src/e2e/`, mirror the path of the page or component they exercise (`src/components/ProjectCard.tsx` → `src/e2e/components/ProjectCard.e2e.tsx`), and use the `.e2e.tsx` extension. Shared fixtures are in `src/e2e/support/`.
+- **Kept apart from unit tests:** Vitest excludes them, as does coverage, and `tsconfig.app.json` leaves them out. They typecheck through `tsconfig.e2e.json`, and run only with `npm run test:e2e`.
+- **Stack lifecycle:** Playwright's global setup runs `docker compose up --build --wait` from the repo root, unless the UI and API are already responding, in which case it reuses them. Teardown stops only a stack that setup started. Set `E2E_KEEP_STACK=1` to leave it running. `E2E_BASE_URL` and `E2E_API_URL` override the default URLs (`localhost:5173` and `localhost:3000`).
+- **Test data:** use the `api` fixture to create test data, and `uniqueName()` for names. Every project the fixture creates or tracks is deleted after the test, and tests run in parallel against one shared stack.
+- **Locators:** prefer roles, labels and placeholders, with `{ exact: true }` where text overlaps. Fall back to `data-testid` (`project-card`, `model-card`) only for containers.
+- **Deploy flow:** `ProjectDetail/ProjectDetails.e2e.tsx` builds and deploys a generated service to LocalStack, then calls its API. It takes a few minutes and needs internet access for `npm install`.
+- **First run:** run `npx playwright install chromium` once.
+
+CI (`.github/workflows/ci.yml`) runs on pushes to `main`, on PRs and on manual runs (`workflow_dispatch`), with Node 22. It has one job per package, plus an e2e job:
 - **Backend:** `npm ci` → `typecheck` → `build` → `test:coverage`
 - **Frontend:** `npm ci` → `lint` (non-blocking until the existing errors are fixed) → `build` → `test:coverage`
+- **E2E** runs only on pushes to `main` (merges) and manual runs, not automatically on PRs. To run it for a PR, use Actions → CI → "Run workflow" on the PR's branch, or `gh workflow run CI --ref <branch>`. The manual run is attached to the PR's head commit (Actions tab, or the commit's checks), while the PR-triggered run keeps listing E2E as "skipped". Re-run it after pushing new commits. The job runs `npm ci` → `playwright install --with-deps chromium` → `test:e2e`, which starts the compose stack. On failure the job prints the compose logs. The Playwright report, traces and videos are uploaded as the `playwright-report` artifact.
 
 Coverage reports are uploaded as artifacts. A coverage threshold failure fails the job.
 
 ### Testing rules (mandatory)
 
-Coverage must stay at 100% in both packages. Treat these as part of the definition of done for any change:
+Coverage must stay at 100% in both packages, and every user-facing feature needs an e2e flow. Treat these as part of the definition of done for any change:
 
 1. **Every code change ships with tests in the same change.** New or modified functions, branches, handlers, components, loaders and actions must have tests written or updated alongside them, not deferred to later.
 2. **Run `npm run test:coverage` in each package you touched before you call the work done**, and make sure it passes. In the backend, also run `npm run typecheck`. A threshold failure is a failing build: fix it by adding tests, never by lowering thresholds, widening `coverage.exclude`, or deleting tests.
 3. **Cover behaviour, not just lines.** For each branch, test both outcomes: success and failure paths, validation errors (400), not-found (404), unexpected errors (500), empty and missing data, and optional fields present and absent. Assert on outputs and side effects (response body, DynamoDB/S3 command inputs, published events, rendered UI, fetch calls), not just that code ran.
 4. **`v8 ignore` hints are a last resort.** Use one only for code that genuinely can't be reached (e.g. a guard the UI or types make impossible). Add a comment explaining why and, if the unreachability points to a bug, an entry in `TODO.md`. Never use a hint to skip code that is merely hard to test; refactor it or mock the dependency instead.
 5. **Bug fixes start with a test.** Write a test that reproduces the bug (it fails first), then fix it. If the bug is listed in `TODO.md`, update the test that documents the old behaviour and tick off or remove the entry.
-6. **Keep tests isolated and deterministic.** No real network or AWS calls: mock SDK clients with `aws-sdk-client-mock`/`vi.mock`, and stub `fetch` and globals with `vi.stubGlobal`. Use fake timers or `vi.setSystemTime` for time-dependent code, and temp directories for filesystem work. Reset mocks and env stubs between tests (`restoreMocks` is on; call `vi.unstubAllEnvs()`/`vi.unstubAllGlobals()` where you stub).
+6. **Keep tests isolated and deterministic.** In unit tests, no real network or AWS calls: mock SDK clients with `aws-sdk-client-mock`/`vi.mock`, and stub `fetch` and globals with `vi.stubGlobal`. Use fake timers or `vi.setSystemTime` for time-dependent code, and temp directories for filesystem work. Reset mocks and env stubs between tests (`restoreMocks` is on; call `vi.unstubAllEnvs()`/`vi.unstubAllGlobals()` where you stub).
 7. **Where tests go:**
    - Backend tests go in `backend-service/test/` at the same relative path as the source (`src/utils/foo.ts` → `test/utils/foo.test.ts`).
    - Frontend tests sit next to the component as `*.test.ts(x)`.
-   - Shared helpers go in `test/helpers.ts` (backend) and `src/test/utils.tsx` (frontend).
+   - E2E flows go in `frontend-service/src/e2e/` at the path of the page or component they exercise, as `*.e2e.tsx` (`src/components/ProjectCard.tsx` → `src/e2e/components/ProjectCard.e2e.tsx`).
+   - Shared helpers go in `test/helpers.ts` (backend), `src/test/utils.tsx` (frontend) and `src/e2e/support/` (e2e).
 8. **New source files are covered automatically** (the coverage `include` is `src/**`), so a new file without tests will fail the threshold. Don't add exclusions for new source files.
+9. **Every new feature ships with e2e tests in the same change.** Unit tests alone are not enough for anything a user can see or do.
+   - **What needs a flow:** a new page, dialog or form, a new action on a project or model, or a new or changed API that the UI calls. Write a Playwright flow that drives it through the UI and checks the result. Check what the UI shows, and also check through the `api` fixture that the change persisted (or that the generated service behaves).
+   - **When you change an existing flow:** update its e2e test.
+   - **Backend-only changes:** cover them with a flow through the UI feature that uses them. If no UI uses the change yet, say so in the PR.
+   - **Cover more than the happy path:** include the main failure or cancel path the user can hit (validation alert, cancel or close, delete confirmation).
+   - **Test data:** create it with the `api` fixture and `uniqueName()`, never with fixed names or shared records. Leave cleanup to the fixture.
+   - **Locators:** prefer roles, labels and placeholders, with `{ exact: true }` where text overlaps. If an element has no accessible name, give it one (`aria-label`) rather than reaching for CSS classes, and use `data-testid` only for containers.
+   - **Before calling the work done**, run `npm run test:e2e` in `frontend-service` and make sure every flow passes. It starts the Docker stack if needed. A failing or flaky flow is a failing build: fix the app or make the test wait properly with web-first `expect` assertions and `toPass`, never with fixed sleeps, `test.skip` or deleted assertions.
 
 ## Backend architecture
 

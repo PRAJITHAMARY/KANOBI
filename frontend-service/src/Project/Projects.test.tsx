@@ -54,8 +54,12 @@ describe("Projects", () => {
 
     await waitFor(() => expect(submissions).toHaveLength(1));
     expect(submissions[0]).toEqual({ name: "Store", description: "desc", action: "post" });
-    await screen.findByRole("heading", { name: "Dashboard" });
-    expect(screen.queryByRole("heading", { name: "New Project" })).not.toBeInTheDocument();
+    // The dashboard comes back one render before the effect that closes the
+    // dialog runs (open state survives the loading screen), so wait for it.
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "New Project" })).not.toBeInTheDocument()
+    );
+    expect(screen.getByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
   });
 
   it("closes the dialog from the ✕ and Cancel buttons", async () => {

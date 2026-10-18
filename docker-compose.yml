@@ -27,10 +27,11 @@ services:
       - ./backend-service/boilerplate:/kanobi/boilerplate:ro
       - localstack-data:/var/lib/localstack
     healthcheck:
-      # Healthy once the seed script has finished, not just when LocalStack is up.
-      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/init/ready | grep -Eq '\"completed\": ?true'"]
+      # Healthy once the seed script has finished *and* seeded the bucket, so a
+      # broken seed (e.g. seed.sh not executable) fails `up --wait` immediately.
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/init/ready | grep -Eq '\"completed\": ?true' && awslocal s3api head-object --bucket kanobi-local --key boilerplate/serverless.yml >/dev/null"]
       interval: 5s
-      timeout: 5s
+      timeout: 10s
       retries: 30
 
   backend:
@@ -54,6 +55,13 @@ services:
     volumes:
       - ./backend-service/src:/app/src
       - ./backend-service/serverless.yml:/app/serverless.yml:ro
+    # Healthy once the API answers (also used by `docker compose up --wait` in e2e).
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/project').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
     depends_on:
       localstack:
         condition: service_healthy
@@ -69,8 +77,15 @@ services:
     volumes:
       - ./frontend-service/src:/app/src
       - ./frontend-service/index.html:/app/index.html
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5173').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   localstack-data:
