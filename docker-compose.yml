@@ -1,0 +1,76 @@
+# Local Kanobi environment: LocalStack (AWS), the control-plane API and the UI.
+#   docker compose up --build
+#   UI:  http://localhost:5173 (admin / password)
+#   API: http://localhost:3000
+# Projects are deployed to LocalStack by the local build runner instead of CodeBuild.
+
+name: kanobi
+
+services:
+  localstack:
+    # Newer LocalStack images need LOCALSTACK_AUTH_TOKEN (free Hobby plan available).
+    # Set LOCALSTACK_IMAGE and LOCALSTACK_AUTH_TOKEN in a root .env to use one.
+    image: ${LOCALSTACK_IMAGE:-localstack/localstack:4.14}
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3,dynamodb,cloudformation,lambda,apigateway,iam,sts,logs,ssm,events
+      DEFAULT_REGION: eu-west-1
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:-}
+      # Generated Lambdas run as sibling containers and must reach LocalStack.
+      LAMBDA_DOCKER_NETWORK: kanobi_default
+      SERVICE_TABLE: KanobiTable
+      BUCKET_NAME: kanobi-local
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./localstack/init:/etc/localstack/init/ready.d:ro
+      - ./backend-service/boilerplate:/kanobi/boilerplate:ro
+      - localstack-data:/var/lib/localstack
+    healthcheck:
+      # Healthy once the seed script has finished, not just when LocalStack is up.
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/init/ready | grep -Eq '\"completed\": ?true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  backend:
+    build: ./backend-service
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: dev
+      DEPLOY_TARGET: localstack
+      STAGE_NAME: local
+      SERVICE_TABLE: KanobiTable
+      BUCKET_NAME: kanobi-local
+      AWS_DEPLOY_REGION: eu-west-1
+      AWS_KEY: test
+      AWS_SECRET: test
+      DYNAMODB_ENDPOINT: http://localstack:4566
+      S3_ENDPOINT: http://localstack:4566
+      AWS_ENDPOINT: http://localstack:4566
+    # Live reload: recompile src/ on change and restart the server.
+    command: sh -c "npx tsc -w --preserveWatchOutput & node --watch dist/local/index.js"
+    volumes:
+      - ./backend-service/src:/app/src
+      - ./backend-service/serverless.yml:/app/serverless.yml:ro
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend-service
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:3000
+      # File watching through Windows/macOS bind mounts needs polling.
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./frontend-service/src:/app/src
+      - ./frontend-service/index.html:/app/index.html
+    depends_on:
+      - backend
+
+volumes:
+  localstack-data:

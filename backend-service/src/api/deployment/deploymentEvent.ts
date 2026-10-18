@@ -7,13 +7,15 @@ import {
 } from "../../utils/S3Client";
 import { DeploymentResponseDto } from "./deployment.dto";
 import { join, dirname } from "path";
-import { mkdirSync, createWriteStream, existsSync } from "fs";
+import { mkdirSync, createWriteStream, existsSync, rmSync } from "fs";
 import archiver from "archiver";
 import { docClient } from "../../utils/dynamodbClient";
 import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { getPutOperators } from "../../utils/dynamodbHelpers";
 import { Keys } from "../../utils/keys";
 import { CodeBuild } from "aws-sdk";
+import { isLocalStack } from "../../utils/awsConfig";
+import { startLocalBuild } from "../../utils/localBuildRunner";
 
 export const DEPLOYMENT_TRIGGERED = "deployment triggered";
 
@@ -55,11 +57,9 @@ export const deploymentTriggeredHandler = async (
     throw "Failed to upload Zip";
   }
 
-  const buildResult = await TriggerBuild(
-    zipKey,
-    projectFolder,
-    payload.projectName
-  );
+  const buildResult = isLocalStack()
+    ? await startLocalBuild(cwd, projectFolder, payload.projectName)
+    : await TriggerBuild(zipKey, projectFolder, payload.projectName);
 
   const op = getPutOperators({
     isDeploying: true,
@@ -167,6 +167,11 @@ async function downloadSourceCode(projectFolder: string) {
   if (!existsSync(downloadPath)) {
     logInfo(deploymentTriggeredHandler.name, "Creating download path");
     mkdirSync(downloadPath);
+  }
+
+  // The local build runs in place, so start from a clean copy of the project.
+  if (isLocalStack()) {
+    rmSync(join(downloadPath, projectFolder), { recursive: true, force: true });
   }
 
   const files = await listFolder(projectFolder);

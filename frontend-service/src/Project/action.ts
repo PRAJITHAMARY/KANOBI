@@ -1,3 +1,5 @@
+import { API_URL } from "../config";
+
 export const projectAction = async ({ request }: { request: Request }) => {
   const formData = await request.formData();
   const action = formData.get("action");
@@ -7,7 +9,7 @@ export const projectAction = async ({ request }: { request: Request }) => {
       const description = formData.get("description");
 
       const response = await fetch(
-        "https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/project",
+        `${API_URL}/project`,
         {
           method: "POST",
           body: JSON.stringify({ name, description }),
@@ -22,7 +24,7 @@ export const projectAction = async ({ request }: { request: Request }) => {
     if (action == "delete") {
       const id = formData.get("projectId");
       const response = await fetch(
-        `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/project/${id}`,
+        `${API_URL}/project/${id}`,
         {
           method: "DELETE",
         }
@@ -37,7 +39,7 @@ export const projectAction = async ({ request }: { request: Request }) => {
       const description = formData.get("description");
       
       const response = await fetch(
-        `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/project/${id}`,
+        `${API_URL}/project/${id}`,
         {
           method: "PUT",
           body: JSON.stringify({ name, description }),

@@ -1,7 +1,9 @@
+import { API_URL } from "../config";
+
 export const projectsLoader = async () => {
   try {
     const response = await fetch(
-      "https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/project"
+      `${API_URL}/project`
     );
 
     const projects = await response.json();

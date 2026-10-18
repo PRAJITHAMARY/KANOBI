@@ -1,10 +1,11 @@
 import { redirect } from "react-router";
+import { API_URL } from "../config";
 
 export const projectDetailLoader = async ({ params }: { params: any }) => {
   try {
     const { id } = params;
     const projectResponse = await fetch(
-      `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/project/${id}`
+      `${API_URL}/project/${id}`
     );
 
     const project = (await projectResponse.json()).data;
@@ -14,12 +15,12 @@ export const projectDetailLoader = async ({ params }: { params: any }) => {
     }
 
     // const projectCost = await fetch(
-    //   `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/project/cost/${id}`
+    //   `${API_URL}/project/cost/${id}`
     // );
     // const bill = (await projectCost.json()).data;
 
     const deploymentResponse = await fetch(
-      `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/deployment/${id}`
+      `${API_URL}/deployment/${id}`
     );
     const deployment = (await deploymentResponse.json()).data;
 

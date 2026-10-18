@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { API_URL } from "../config";
 
 type Project = {
   id: string;
@@ -59,7 +60,7 @@ export default function ModelManager({
     };
 
     const res = await fetch(
-      `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/model/${project.id}`,
+      `${API_URL}/model/${project.id}`,
       {
         method: "POST",
         body: JSON.stringify(newModel),
@@ -91,7 +92,7 @@ export default function ModelManager({
   // Delete model
   const deleteModel = async (id: string) => {
     const res = await fetch(
-      `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/model/${project.id}/${id}`,
+      `${API_URL}/model/${project.id}/${id}`,
       {
         method: "DELETE",
       }
@@ -238,7 +239,7 @@ export default function ModelManager({
     if (!relation) return;
 
     const res = await fetch(
-      `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/model-relations/${project.id}/${modelId}`,
+      `${API_URL}/model-relations/${project.id}/${modelId}`,
       {
         method: "PUT",
         body: JSON.stringify({
@@ -268,7 +269,7 @@ export default function ModelManager({
     /* v8 ignore if -- @preserve */
     if (relToDelete.length > 0) {
       await fetch(
-        `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/model-relations/${project.id}/${modelId}`,
+        `${API_URL}/model-relations/${project.id}/${modelId}`,
         {
           method: "PUT",
           body: JSON.stringify({
@@ -284,7 +285,7 @@ export default function ModelManager({
     }
 
     const res = await fetch(
-      `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/model/${project.id}/${modelId}`,
+      `${API_URL}/model/${project.id}/${modelId}`,
       {
         method: "PUT",
         body: JSON.stringify({
@@ -296,7 +297,7 @@ export default function ModelManager({
     );
 
     const res1 = await fetch(
-      `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/model-api/${project.id}/${modelId}`,
+      `${API_URL}/model-api/${project.id}/${modelId}`,
       {
         method: "PUT",
         body: JSON.stringify({
@@ -306,7 +307,7 @@ export default function ModelManager({
     );
 
     await fetch(
-      `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/model-relations/${project.id}/${modelId}`,
+      `${API_URL}/model-relations/${project.id}/${modelId}`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -338,7 +339,7 @@ export default function ModelManager({
 
   const redeployChanges = async () => {
     const res = await fetch(
-      `https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging/deployment`,
+      `${API_URL}/deployment`,
       {
         method: "PUT",
         body: JSON.stringify({
