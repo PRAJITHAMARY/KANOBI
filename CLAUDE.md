@@ -66,19 +66,28 @@ Coverage reports are uploaded as artifacts. A coverage threshold failure fails t
 
 ### Testing rules (mandatory)
 
-Coverage must stay at 100% in both packages. Treat these as part of the definition of done for any change:
+Coverage must stay at 100% in both packages, and every user-facing feature needs an e2e flow. Treat these as part of the definition of done for any change:
 
 1. **Every code change ships with tests in the same change.** New or modified functions, branches, handlers, components, loaders and actions must have tests written or updated alongside them, not deferred to later.
 2. **Run `npm run test:coverage` in each package you touched before you call the work done**, and make sure it passes. In the backend, also run `npm run typecheck`. A threshold failure is a failing build: fix it by adding tests, never by lowering thresholds, widening `coverage.exclude`, or deleting tests.
 3. **Cover behaviour, not just lines.** For each branch, test both outcomes: success and failure paths, validation errors (400), not-found (404), unexpected errors (500), empty and missing data, and optional fields present and absent. Assert on outputs and side effects (response body, DynamoDB/S3 command inputs, published events, rendered UI, fetch calls), not just that code ran.
 4. **`v8 ignore` hints are a last resort.** Use one only for code that genuinely can't be reached (e.g. a guard the UI or types make impossible). Add a comment explaining why and, if the unreachability points to a bug, an entry in `TODO.md`. Never use a hint to skip code that is merely hard to test; refactor it or mock the dependency instead.
 5. **Bug fixes start with a test.** Write a test that reproduces the bug (it fails first), then fix it. If the bug is listed in `TODO.md`, update the test that documents the old behaviour and tick off or remove the entry.
-6. **Keep tests isolated and deterministic.** No real network or AWS calls: mock SDK clients with `aws-sdk-client-mock`/`vi.mock`, and stub `fetch` and globals with `vi.stubGlobal`. Use fake timers or `vi.setSystemTime` for time-dependent code, and temp directories for filesystem work. Reset mocks and env stubs between tests (`restoreMocks` is on; call `vi.unstubAllEnvs()`/`vi.unstubAllGlobals()` where you stub).
+6. **Keep tests isolated and deterministic.** In unit tests, no real network or AWS calls: mock SDK clients with `aws-sdk-client-mock`/`vi.mock`, and stub `fetch` and globals with `vi.stubGlobal`. Use fake timers or `vi.setSystemTime` for time-dependent code, and temp directories for filesystem work. Reset mocks and env stubs between tests (`restoreMocks` is on; call `vi.unstubAllEnvs()`/`vi.unstubAllGlobals()` where you stub).
 7. **Where tests go:**
    - Backend tests go in `backend-service/test/` at the same relative path as the source (`src/utils/foo.ts` → `test/utils/foo.test.ts`).
    - Frontend tests sit next to the component as `*.test.ts(x)`.
-   - Shared helpers go in `test/helpers.ts` (backend) and `src/test/utils.tsx` (frontend).
+   - E2E flows go in `frontend-service/src/e2e/` at the path of the page or component they exercise, as `*.e2e.tsx` (`src/components/ProjectCard.tsx` → `src/e2e/components/ProjectCard.e2e.tsx`).
+   - Shared helpers go in `test/helpers.ts` (backend), `src/test/utils.tsx` (frontend) and `src/e2e/support/` (e2e).
 8. **New source files are covered automatically** (the coverage `include` is `src/**`), so a new file without tests will fail the threshold. Don't add exclusions for new source files.
+9. **Every new feature ships with e2e tests in the same change.** Unit tests alone are not enough for anything a user can see or do.
+   - **What needs a flow:** a new page, dialog or form, a new action on a project or model, or a new or changed API that the UI calls. Write a Playwright flow that drives it through the UI and checks the result. Check what the UI shows, and also check through the `api` fixture that the change persisted (or that the generated service behaves).
+   - **When you change an existing flow:** update its e2e test.
+   - **Backend-only changes:** cover them with a flow through the UI feature that uses them. If no UI uses the change yet, say so in the PR.
+   - **Cover more than the happy path:** include the main failure or cancel path the user can hit (validation alert, cancel or close, delete confirmation).
+   - **Test data:** create it with the `api` fixture and `uniqueName()`, never with fixed names or shared records. Leave cleanup to the fixture.
+   - **Locators:** prefer roles, labels and placeholders, with `{ exact: true }` where text overlaps. If an element has no accessible name, give it one (`aria-label`) rather than reaching for CSS classes, and use `data-testid` only for containers.
+   - **Before calling the work done**, run `npm run test:e2e` in `frontend-service` and make sure every flow passes. It starts the Docker stack if needed. A failing or flaky flow is a failing build: fix the app or make the test wait properly with web-first `expect` assertions and `toPass`, never with fixed sleeps, `test.skip` or deleted assertions.
 
 ## Backend architecture
 

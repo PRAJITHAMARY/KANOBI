@@ -27,10 +27,11 @@ services:
       - ./backend-service/boilerplate:/kanobi/boilerplate:ro
       - localstack-data:/var/lib/localstack
     healthcheck:
-      # Healthy once the seed script has finished, not just when LocalStack is up.
-      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/init/ready | grep -Eq '\"completed\": ?true'"]
+      # Healthy once the seed script has finished *and* seeded the bucket, so a
+      # broken seed (e.g. seed.sh not executable) fails `up --wait` immediately.
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/init/ready | grep -Eq '\"completed\": ?true' && awslocal s3api head-object --bucket kanobi-local --key boilerplate/serverless.yml >/dev/null"]
       interval: 5s
-      timeout: 5s
+      timeout: 10s
       retries: 30
 
   backend:

@@ -126,13 +126,14 @@ jobs:
       - name: Run e2e flows
         run: npm run test:e2e
 
+      # Also on timeout/cancel, which is how a hung flow ends.
       - name: Docker compose logs
-        if: ${{ failure() }}
+        if: ${{ failure() || cancelled() }}
         working-directory: .
         run: docker compose logs --no-color --timestamps
 
       - name: Upload Playwright report
-        if: ${{ !cancelled() }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@v5
         with:
           name: playwright-report
