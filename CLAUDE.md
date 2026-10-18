@@ -20,6 +20,7 @@ Backend (`cd backend-service`):
 Frontend (`cd frontend-service`):
 - `npm run dev` / `npm run build` (`tsc -b && vite build`) / `npm run lint` / `npm run preview`
 - `npm test` / `npm run test:coverage`
+- `npm run test:e2e`: Playwright flows against the Docker stack (see "E2E tests"). Also `test:e2e:ui` and `test:e2e:report`.
 - Installs need `legacy-peer-deps` (set in `.npmrc`) because `swagger-ui-react` declares support only for React below 19.
 
 ## Local environment (Docker)
@@ -46,9 +47,20 @@ Both packages use Vitest with v8 coverage and enforce a **100% threshold** on li
 - Frontend tests sit next to the code they cover (`*.test.tsx`), with jsdom and Testing Library. Render route components through `renderWithRouter` (`src/test/utils.tsx`) with a stub loader/action, and stub `fetch` (and `location` for `reload`) with `vi.stubGlobal`.
 - Truly unreachable guards are excluded with `/* v8 ignore if -- @preserve */` (the `@preserve` is required so the TS transform keeps the comment). Known bugs, including the ones those hints cover, are tracked in `TODO.md`.
 
-CI (`.github/workflows/ci.yml`) runs on pushes to `main` and on PRs, with Node 22. It has one job per package:
+### E2E tests (Playwright)
+
+- **What they cover:** user flows through the real app (UI → API → LocalStack), not units. They live in `frontend-service/src/e2e/`, mirror the path of the page or component they exercise (`src/components/ProjectCard.tsx` → `src/e2e/components/ProjectCard.e2e.tsx`), and use the `.e2e.tsx` extension. Shared fixtures are in `src/e2e/support/`.
+- **Kept apart from unit tests:** Vitest excludes them, as does coverage, and `tsconfig.app.json` leaves them out. They typecheck through `tsconfig.e2e.json`, and run only with `npm run test:e2e`.
+- **Stack lifecycle:** Playwright's global setup runs `docker compose up --build --wait` from the repo root, unless the UI and API are already responding, in which case it reuses them. Teardown stops only a stack that setup started. Set `E2E_KEEP_STACK=1` to leave it running. `E2E_BASE_URL` and `E2E_API_URL` override the default URLs (`localhost:5173` and `localhost:3000`).
+- **Test data:** use the `api` fixture to create test data, and `uniqueName()` for names. Every project the fixture creates or tracks is deleted after the test, and tests run in parallel against one shared stack.
+- **Locators:** prefer roles, labels and placeholders, with `{ exact: true }` where text overlaps. Fall back to `data-testid` (`project-card`, `model-card`) only for containers.
+- **Deploy flow:** `ProjectDetail/ProjectDetails.e2e.tsx` builds and deploys a generated service to LocalStack, then calls its API. It takes a few minutes and needs internet access for `npm install`.
+- **First run:** run `npx playwright install chromium` once.
+
+CI (`.github/workflows/ci.yml`) runs on pushes to `main` and on PRs, with Node 22. It has one job per package, plus an e2e job:
 - **Backend:** `npm ci` → `typecheck` → `build` → `test:coverage`
 - **Frontend:** `npm ci` → `lint` (non-blocking until the existing errors are fixed) → `build` → `test:coverage`
+- **E2E:** `npm ci` → `playwright install --with-deps chromium` → `test:e2e`, which starts the compose stack. On failure the job prints the compose logs. The Playwright report, traces and videos are uploaded as the `playwright-report` artifact.
 
 Coverage reports are uploaded as artifacts. A coverage threshold failure fails the job.
 

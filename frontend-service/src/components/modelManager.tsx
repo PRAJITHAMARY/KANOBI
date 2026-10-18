@@ -311,7 +311,7 @@ export default function ModelManager({
       {
         method: "POST",
         body: JSON.stringify({
-          relations: model.relations.map((relation) => {
+          relations: (model.relations ?? []).map((relation) => {
             return {
               modelId: relation.modelId,
               relationship: relation.relationship,
@@ -387,6 +387,7 @@ export default function ModelManager({
         {models.map((model) => (
           <div
             key={model.id}
+            data-testid="model-card"
             className="border rounded p-4 shadow bg-gray-900 space-y-4"
           >
             {/* Model Header: name + description + delete */}
