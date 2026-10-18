@@ -57,10 +57,10 @@ Both packages use Vitest with v8 coverage and enforce a **100% threshold** on li
 - **Deploy flow:** `ProjectDetail/ProjectDetails.e2e.tsx` builds and deploys a generated service to LocalStack, then calls its API. It takes a few minutes and needs internet access for `npm install`.
 - **First run:** run `npx playwright install chromium` once.
 
-CI (`.github/workflows/ci.yml`) runs on pushes to `main` and on PRs, with Node 22. It has one job per package, plus an e2e job:
+CI (`.github/workflows/ci.yml`) runs on pushes to `main`, on PRs and on manual runs (`workflow_dispatch`), with Node 22. It has one job per package, plus an e2e job:
 - **Backend:** `npm ci` → `typecheck` → `build` → `test:coverage`
 - **Frontend:** `npm ci` → `lint` (non-blocking until the existing errors are fixed) → `build` → `test:coverage`
-- **E2E:** `npm ci` → `playwright install --with-deps chromium` → `test:e2e`, which starts the compose stack. On failure the job prints the compose logs. The Playwright report, traces and videos are uploaded as the `playwright-report` artifact.
+- **E2E** runs only on pushes to `main` (merges) and manual runs, not automatically on PRs. To run it for a PR, use Actions → CI → "Run workflow" on the PR's branch, or `gh workflow run CI --ref <branch>`; the result appears in the PR's checks. The job runs `npm ci` → `playwright install --with-deps chromium` → `test:e2e`, which starts the compose stack. On failure the job prints the compose logs. The Playwright report, traces and videos are uploaded as the `playwright-report` artifact.
 
 Coverage reports are uploaded as artifacts. A coverage threshold failure fails the job.
 
