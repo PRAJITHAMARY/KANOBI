@@ -1,4 +1,4 @@
-import { expect, login, test } from "../support/fixtures";
+import { acceptNextDialog, expect, login, test } from "../support/fixtures";
 
 test.describe("Login", () => {
   test("rejects invalid credentials with an alert", async ({ page }) => {
@@ -6,11 +6,9 @@ test.describe("Login", () => {
     await page.getByPlaceholder("Username").fill("admin");
     await page.getByPlaceholder("Password").fill("wrong");
 
-    const dialog = page.waitForEvent("dialog");
+    const alert = acceptNextDialog(page);
     await page.getByRole("button", { name: "Login" }).click();
-    const alert = await dialog;
-    expect(alert.message()).toBe("Invalid credentials");
-    await alert.accept();
+    expect(await alert).toBe("Invalid credentials");
 
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole("heading", { name: "Login" })).toBeVisible();

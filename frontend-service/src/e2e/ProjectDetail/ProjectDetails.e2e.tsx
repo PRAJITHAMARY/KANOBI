@@ -1,4 +1,4 @@
-import { expect, test } from "../support/fixtures";
+import { acceptNextDialog, expect, test } from "../support/fixtures";
 
 // Builds and deploys the generated service to LocalStack (npm install, tsc,
 // serverless deploy), so this flow takes a few minutes.
@@ -15,11 +15,9 @@ test.describe("Project details: deployment", () => {
     await page.goto(`/project/${project.id}`);
     await expect(page.getByRole("heading", { name: project.name, level: 1 })).toBeVisible();
 
-    const dialog = page.waitForEvent("dialog");
+    const alert = acceptNextDialog(page);
     await page.getByRole("button", { name: "Deploy changes" }).click();
-    const alert = await dialog;
-    expect(alert.message()).toBe("Redeployment in progress... Refresh page to see logs");
-    await alert.accept();
+    expect(await alert).toBe("Redeployment in progress... Refresh page to see logs");
 
     // Wait for the build through the API so a failed build fails the test right
     // away, with the build log in the message, instead of timing out.

@@ -107,6 +107,20 @@ export const test = base.extend<Fixtures>({
   },
 });
 
+/**
+ * Accepts the next alert/confirm and resolves with its message. Register it
+ * *before* the action that opens the dialog: the dialog blocks the page, so an
+ * action like click() may not finish until the dialog is handled, and awaiting
+ * the click first deadlocks.
+ */
+export function acceptNextDialog(page: Page): Promise<string> {
+  return new Promise((resolve, reject) => {
+    page.once("dialog", (dialog) => {
+      dialog.accept().then(() => resolve(dialog.message()), reject);
+    });
+  });
+}
+
 /** Logs in through the login form (credentials are checked client-side). */
 export async function login(page: Page) {
   await page.goto("/");
