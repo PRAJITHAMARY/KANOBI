@@ -102,8 +102,8 @@ jobs:
 
   # Slow (Docker stack + a real deploy to LocalStack), so it runs only on merges
   # to main and on manual runs. For a PR: Actions → CI → "Run workflow" on the
-  # PR's branch, or `gh workflow run CI --ref <branch>`; the result shows up in
-  # the PR's checks.
+  # PR's branch, or `gh workflow run CI --ref <branch>`. That run is attached to
+  # the PR's head commit; the PR-triggered run still lists e2e as "skipped".
   e2e:
     name: E2E (Playwright + Docker stack)
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
