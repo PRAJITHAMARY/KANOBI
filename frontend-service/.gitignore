@@ -25,7 +25,7 @@ dist-ssr
 
 coverage
 
-# Playwright
+# Playwright (npm run test:e2e); CI uploads these as artifacts
 test-results
 playwright-report
 blob-report
