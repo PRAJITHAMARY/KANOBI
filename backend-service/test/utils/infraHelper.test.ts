@@ -39,6 +39,9 @@ import {
 } from "../../src/utils/infraHelper";
 import { PROJECT_ID } from "../helpers";
 
+const local = vi.hoisted(() => ({ getLocalBuild: vi.fn() }));
+vi.mock("../../src/utils/localBuildRunner", () => local);
+
 const codebuild = mockClient(CodeBuildClient);
 const logs = mockClient(CloudWatchLogsClient);
 const cfn = mockClient(CloudFormationClient);
@@ -53,7 +56,10 @@ beforeEach(() => {
   apiGw.reset();
   cost.reset();
   s3.reset();
+  local.getLocalBuild.mockReset();
 });
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("getResourceName / getServiceName", () => {
   it("strips dashes and tolerates a missing id", () => {
@@ -167,6 +173,25 @@ describe("FetchBuildLogs", () => {
     expect(await FetchBuildLogs("b1")).toEqual({ build, logs: "only" });
   });
 
+  it("reads local builds instead of CodeBuild when targeting LocalStack", async () => {
+    vi.stubEnv("DEPLOY_TARGET", "localstack");
+    const localBuild = { build: { id: "local:1", buildStatus: "SUCCEEDED" }, logs: "done" };
+    local.getLocalBuild.mockResolvedValue(localBuild);
+
+    expect(await FetchBuildLogs("local:1")).toEqual(localBuild);
+    expect(local.getLocalBuild).toHaveBeenCalledWith("local:1");
+    expect(codebuild.calls()).toHaveLength(0);
+  });
+
+  it("returns a failure placeholder when a local build can't be read", async () => {
+    vi.stubEnv("DEPLOY_TARGET", "localstack");
+    local.getLocalBuild.mockRejectedValue(new SyntaxError("bad json"));
+    expect(await FetchBuildLogs("local:1")).toEqual({
+      build: null,
+      logs: "Failed to fetch logs",
+    });
+  });
+
   it("returns a failure placeholder on error", async () => {
     codebuild.on(BatchGetBuildsCommand).rejects(new Error("x"));
     expect(await FetchBuildLogs("b1")).toEqual({
@@ -268,6 +293,17 @@ describe.each([
     const input = cost.commandCalls(GetCostAndUsageCommand)[0].args[0].input;
     expect(input.GroupBy).toEqual([{ Type: "TAG", Key: "Project" }]);
     expect(input.TimePeriod).toEqual({ Start: "2026-03-01", End: expectedEnd });
+  });
+
+  it("returns zero without calling Cost Explorer when targeting LocalStack", async () => {
+    vi.stubEnv("DEPLOY_TARGET", "localstack");
+    expect(await fn("Project", "p1")).toEqual({
+      tagKey: "Project",
+      tagValue: "p1",
+      amount: "0.00",
+      currency: "USD",
+    });
+    expect(cost.calls()).toHaveLength(0);
   });
 
   it("defaults to zero USD when nothing matches", async () => {

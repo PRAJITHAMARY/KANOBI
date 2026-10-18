@@ -11,6 +11,7 @@ const s3 = vi.hoisted(() => ({
   listFolder: vi.fn(),
   uploadFile: vi.fn(),
 }));
+const local = vi.hoisted(() => ({ startLocalBuild: vi.fn() }));
 const codebuild = vi.hoisted(() => ({ startBuild: vi.fn(), options: [] as unknown[] }));
 const zip = vi.hoisted(() => ({
   fail: false,
@@ -26,6 +27,7 @@ vi.mock("../../src/utils/S3Client", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   ...s3,
 }));
+vi.mock("../../src/utils/localBuildRunner", () => local);
 vi.mock("aws-sdk", () => ({
   CodeBuild: class {
     constructor(options: unknown) {
@@ -80,6 +82,7 @@ beforeEach(() => {
   s3.uploadFile.mockResolvedValue({ ETag: "e" });
   codebuild.startBuild.mockReset();
   codebuild.options.length = 0;
+  local.startLocalBuild.mockReset();
   zip.fail = false;
   zip.dirs.length = 0;
 });
@@ -150,6 +153,32 @@ describe("deploymentTriggeredHandler", () => {
         ":currentPhase": "QUEUED",
         ":buildComplete": false,
       },
+    });
+  });
+
+  it("builds locally from a clean copy when targeting LocalStack", async () => {
+    vi.stubEnv("DEPLOY_TARGET", "localstack");
+    const projectDir = join(workDir, ".downloads", "p1");
+    fs.mkdirSync(join(projectDir, "node_modules"), { recursive: true });
+    fs.writeFileSync(join(projectDir, "stale.ts"), "old");
+    givenRemoteFiles({ "p1/serverless.yml": "service: x" });
+    local.startLocalBuild.mockResolvedValue({
+      build: { id: "local:1", buildStatus: "IN_PROGRESS", currentPhase: "INSTALL", buildComplete: false },
+    });
+
+    await deploymentTriggeredHandler(payload);
+
+    expect(fs.existsSync(join(projectDir, "stale.ts"))).toBe(false);
+    expect(fs.existsSync(join(projectDir, "node_modules"))).toBe(false);
+    expect(fs.readFileSync(join(projectDir, "serverless.yml"), "utf-8")).toBe("service: x");
+    expect(local.startLocalBuild).toHaveBeenCalledWith(projectDir, "p1", "Shop");
+    expect(codebuild.startBuild).not.toHaveBeenCalled();
+    expect(ddb.commandCalls(UpdateCommand)[0].args[0].input.ExpressionAttributeValues).toMatchObject({
+      ":isDeploying": true,
+      ":buildId": "local:1",
+      ":buildStatus": "IN_PROGRESS",
+      ":currentPhase": "INSTALL",
+      ":buildComplete": false,
     });
   });
 

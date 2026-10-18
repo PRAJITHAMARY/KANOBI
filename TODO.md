@@ -52,7 +52,7 @@ Tests currently **document** the existing behaviour for the bugs below; fixing a
 - [ ] **Stale relationships are never removed.** `relToDelete` is never filled: `editRelationship` only records the old relation when `field == "relatedModel"`, but the selects only edit `modelId` and `relationship` (`modelManager.tsx:210`). The cleanup PUT in `pushModelUpdate` therefore never runs. These paths are excluded from coverage with `v8 ignore` hints until they're fixed.
 - [ ] **Cancel buttons submit their forms.** In the "New Project" and "Edit Project" dialogs (`Projects.tsx:62`, `ProjectCard.tsx:99`), the Cancel buttons have no `type="button"`, so clicking Cancel also submits the form (an edit is sent with no `action`).
 - [ ] **Loader errors crash the page.** On network errors the loaders call `alert()` and return `undefined` (`Project/loader.ts:11`, `ProjectDetail/loader.ts:28`). The pages then destructure `undefined` from `useLoaderData()` and crash. Throw, and use an `errorElement`.
-- [ ] **The API base URL is hard-coded to a staging endpoint** in every loader, action and `modelManager.tsx`. Move it to `import.meta.env`.
+- [x] **The API base URL is hard-coded to a staging endpoint** in every loader, action and `modelManager.tsx`. Moved to `VITE_API_URL` (`src/config.ts`).
 - [ ] **Cost cards never show.** `ProjectDetails` renders cost cards from `bill`, but the loader's cost fetch is commented out (`ProjectDetail/loader.ts:16-19`).
 - [ ] **`deleteRelationship` sends an extra field.** It sends `modelName`, which the backend schema doesn't define (it is stripped). For an unsaved row it sends `modelId: ""`.
 - [ ] **Debug logging left in.** `console.log` runs on every `ModelManager` render and after creating a model.

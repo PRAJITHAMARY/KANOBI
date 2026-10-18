@@ -19,26 +19,20 @@ import {
   GetExportCommand,
 } from "@aws-sdk/client-api-gateway";
 import { emptyBucket } from "./S3Client";
+import { infraClientConfig, isLocalStack } from "./awsConfig";
+import { getLocalBuild } from "./localBuildRunner";
 import {
   CostExplorerClient,
   GetCostAndUsageCommand,
 } from "@aws-sdk/client-cost-explorer";
 
-const codebuild = new CodeBuildClient({
-  region: process.env.AWS_DEPLOY_REGION,
-});
+const codebuild = new CodeBuildClient(infraClientConfig());
 
-const cloudWatchLogs = new CloudWatchLogsClient({
-  region: process.env.AWS_DEPLOY_REGION,
-});
+const cloudWatchLogs = new CloudWatchLogsClient(infraClientConfig());
 
-const apiGwClient = new APIGatewayClient({
-  region: process.env.AWS_DEPLOY_REGION,
-});
+const apiGwClient = new APIGatewayClient(infraClientConfig());
 
-const cloudFormation = new CloudFormationClient({
-  region: process.env.AWS_DEPLOY_REGION,
-});
+const cloudFormation = new CloudFormationClient(infraClientConfig());
 
 const costClient = new CostExplorerClient({
   region: process.env.AWS_DEPLOY_REGION,
@@ -91,6 +85,10 @@ export async function FetchBuildLogs(buildId: string): Promise<{
         build: null,
         logs: "No logs found",
       };
+    }
+
+    if (isLocalStack()) {
+      return await getLocalBuild(buildId);
     }
 
     const buildData = await codebuild.send(
@@ -200,7 +198,17 @@ export function getServiceName(projectId: string) {
   return serviceName;
 }
 
+// Cost Explorer isn't available in LocalStack, so local projects cost nothing.
+const localCost = (tagKey: string, tagValue: string) => ({
+  tagKey,
+  tagValue,
+  amount: "0.00",
+  currency: "USD",
+});
+
 export async function getStackCurrentCost(tagKey: string, tagValue: string) {
+  if (isLocalStack()) return localCost(tagKey, tagValue);
+
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth(), 1);
 
@@ -239,6 +247,8 @@ export async function getStackCurrentCost(tagKey: string, tagValue: string) {
 }
 
 export async function getStackMonthlyCost(tagKey: string, tagValue: string) {
+  if (isLocalStack()) return localCost(tagKey, tagValue);
+
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth(), 1);
   const end = new Date(today.getFullYear(), today.getMonth() + 1, 1);

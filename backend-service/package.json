@@ -7,6 +7,7 @@
     "dev": "rm -rf dist && tsc && node dist/index.js",
     "build": "rm -rf dist && tsc",
     "start": "npm run build && sls offline -s dev",
+    "start:local": "npm run build && node dist/local/index.js",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit -p . && tsc -p test"

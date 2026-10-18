@@ -6,7 +6,7 @@ import {
 } from "react-router";
 import { vi } from "vitest";
 
-export const API = "https://avw4j9bkn7.execute-api.eu-west-1.amazonaws.com/staging";
+export const API = "http://api.test";
 
 export const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {

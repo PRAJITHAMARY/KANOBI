@@ -22,6 +22,22 @@ Frontend (`cd frontend-service`):
 - `npm test` / `npm run test:coverage`
 - Installs need `legacy-peer-deps` (set in `.npmrc`) because `swagger-ui-react` declares support only for React below 19.
 
+## Local environment (Docker)
+
+`docker compose up --build` from the repo root starts:
+- **localstack (:4566):** S3, DynamoDB, CloudFormation, Lambda, API Gateway, and others. `localstack/init/seed.sh` creates `KanobiTable` and the `kanobi-local` bucket and syncs `backend-service/boilerplate/` to `s3://kanobi-local/boilerplate/` on every start.
+- **backend (:3000):** `src/local/devServer.ts`, a small HTTP server that maps the `http` events in `serverless.yml` to the compiled handlers. It doesn't use `sls offline`, because Serverless v4 needs a login. It runs with `NODE_ENV=dev` and `DEPLOY_TARGET=localstack`, and `src/` is live-reloaded.
+- **frontend (:5173):** Vite with `VITE_API_URL=http://localhost:3000`.
+
+How `DEPLOY_TARGET=localstack` changes behaviour (`src/utils/awsConfig.ts`):
+- Deploys run in `src/utils/localBuildRunner.ts` inside the backend container instead of CodeBuild. It follows the buildspec steps and adds `serverless-localstack` to the project's `serverless.yml`.
+- The runner deploys with `serverless@3` to LocalStack and keeps build state and logs in S3 under `builds/<id>.json`.
+- CloudFormation and API Gateway clients use `AWS_ENDPOINT`, and the cost endpoints return 0.
+
+Newer LocalStack images need `LOCALSTACK_AUTH_TOKEN`. The compose file defaults to a pinned 4.x community image; override it with `LOCALSTACK_IMAGE` and `LOCALSTACK_AUTH_TOKEN` in a root `.env` (see `.env.example`). LocalStack runs Lambdas as sibling containers through the mounted Docker socket.
+
+Without Docker, run `npm run start:local` in `backend-service` against your own LocalStack, with the env vars from `docker-compose.yml`.
+
 ## Tests
 
 Both packages use Vitest with v8 coverage and enforce a **100% threshold** on lines, branches, functions and statements, so any uncovered new code fails `test:coverage`. Run a single file with `npx vitest run <path>` or a single test with `-t "<name>"`.
@@ -76,4 +92,4 @@ Responses go through `ResponseManager` (`src/utils/responseManager.ts`), and log
 
 ## Frontend architecture
 
-Routes are defined in `src/main.tsx` with `createBrowserRouter`. Each page folder (`Login/`, `Project/`, `ProjectDetail/`) pairs a component with `loader.ts`/`action.ts`, and data fetching and mutations happen in those files, not in components. Actions dispatch on a hidden `action` form field (`post`/`put`/`delete`). The backend base URL (a staging API Gateway endpoint) is **hardcoded** in each loader and action. Login is a hardcoded client-side check.
+Routes are defined in `src/main.tsx` with `createBrowserRouter`. Each page folder (`Login/`, `Project/`, `ProjectDetail/`) pairs a component with `loader.ts`/`action.ts`, and data fetching and mutations happen in those files, not in components. Actions dispatch on a hidden `action` form field (`post`/`put`/`delete`). The backend base URL is `API_URL` (`src/config.ts`), read from `VITE_API_URL`: `.env.development` (localhost:3000), `.env.production` (the staging API Gateway endpoint), or `.env.test`. Login is a hardcoded client-side check.
