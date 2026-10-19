@@ -126,4 +126,6 @@ Responses go through `ResponseManager` (`src/utils/responseManager.ts`), and log
 
 ## Frontend architecture
 
+**UI redesign:** the screens are in the [Project Kanobi Figma file](https://www.figma.com/design/K9vwhf5Vuc2hg0BYLznZRS/Project-Kanobi), with a local gitignored export in `figma-screenshot/`. Before building or changing any screen, read `DESIGN.md`, which overrides the designs where they're inconsistent or show features Kanobi doesn't have. It defines the app shell, the `StatusPill` variants, the real endpoint and response formats, and what to hide until the backend supports it. Update `DESIGN.md` in the same change when a hidden feature gets built.
+
 Routes are defined in `src/main.tsx` with `createBrowserRouter`. Each page folder (`Login/`, `Project/`, `ProjectDetail/`) pairs a component with `loader.ts`/`action.ts`, and data fetching and mutations happen in those files, not in components. Actions dispatch on a hidden `action` form field (`post`/`put`/`delete`). The backend base URL is `API_URL` (`src/config.ts`), read from `VITE_API_URL`: `.env.development` (localhost:3000), `.env.production` (the staging API Gateway endpoint), or `.env.test`. Login is a hardcoded client-side check.
