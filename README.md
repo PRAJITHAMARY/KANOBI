@@ -176,8 +176,9 @@ npx sls deploy -s <stage>
   ```bash
   aws s3 sync backend-service/boilerplate "s3://$BUCKET_NAME/boilerplate/" --exclude ".env*"
   ```
-- A CodeBuild project named `sls-code-deploy`. Generated services are deployed through it.
-- The variables from `backend-service/.env.example`, in a `.env` file. Today these include static AWS keys. [TODO.md](TODO.md) tracks replacing them with IAM roles.
+- The variables from `backend-service/.env.example`, in a `.env` file. There are no AWS keys: `sls deploy` uses your AWS profile, and the deployed Lambdas use their execution role.
+
+`sls deploy` also creates the CodeBuild project that deploys generated services (`kanobi-deploy-<stage>`), its service role, and the role CloudFormation uses to create and delete generated services' resources. Every role is scoped to the resources Kanobi uses. Older setups had a hand-made `sls-code-deploy` CodeBuild project; it is no longer used and can be deleted.
 
 **Frontend.** `npm run build` produces a static site in `frontend-service/dist/`, pointed at the URL in `.env.production`.
 

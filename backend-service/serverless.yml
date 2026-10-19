@@ -23,15 +23,87 @@ provider:
     DYNAMODB_ENDPOINT: ${env:DYNAMODB_ENDPOINT}
     S3_ENDPOINT: ${env:S3_ENDPOINT}
     AWS_DEPLOY_REGION: ${env:AWS_DEPLOY_REGION}
-    AWS_KEY: ${env:AWS_KEY}
-    AWS_SECRET: ${env:AWS_SECRET}
     BUCKET_NAME: ${env:BUCKET_NAME}
     region: ${env:AWS_DEPLOY_REGION}
+    CODEBUILD_PROJECT:
+      Ref: DeployProject
+    CFN_EXECUTION_ROLE_ARN:
+      Fn::GetAtt: [CfnExecutionRole, Arn]
+  # No static keys: every AWS call runs as this role. Each statement covers
+  # only the calls the control plane makes (see src/utils/*.ts).
   iam:
     role:
       statements:
+        # Single-table data (project, model and deployment rows).
         - Effect: Allow
-          Action: "*"
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:BatchWriteItem
+          Resource:
+            - Fn::GetAtt: [KanobiTable, Arn]
+        # Boilerplate, generated project sources, deploy zips and swagger files.
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:DeleteObject
+          Resource: arn:aws:s3:::${env:BUCKET_NAME}/*
+        - Effect: Allow
+          Action: s3:ListBucket
+          Resource: arn:aws:s3:::${env:BUCKET_NAME}
+        # Emptying a generated service's buckets before its stack is deleted.
+        - Effect: Allow
+          Action:
+            - s3:ListBucket
+            - s3:ListBucketVersions
+          Resource:
+            - arn:aws:s3:::*-files
+            - arn:aws:s3:::service-*-serverlessdeploymentbuck*
+        - Effect: Allow
+          Action:
+            - s3:DeleteObject
+            - s3:DeleteObjectVersion
+          Resource:
+            - arn:aws:s3:::*-files/*
+            - arn:aws:s3:::service-*-serverlessdeploymentbuck*/*
+        # Async event handlers (src/utils/eventhub.ts).
+        - Effect: Allow
+          Action: lambda:InvokeFunction
+          Resource: arn:aws:lambda:${aws:region}:${aws:accountId}:function:${self:service}-${sls:stage}-*
+        # Starting deploys and reading their status and logs.
+        - Effect: Allow
+          Action:
+            - codebuild:StartBuild
+            - codebuild:BatchGetBuilds
+          Resource:
+            Fn::GetAtt: [DeployProject, Arn]
+        - Effect: Allow
+          Action: logs:GetLogEvents
+          Resource: arn:aws:logs:${aws:region}:${aws:accountId}:log-group:/aws/codebuild/kanobi-deploy-${sls:stage}:*
+        # Generated services' stacks: endpoint details and deletion. Deletion
+        # runs as CfnExecutionRole, which the stack was deployed with.
+        - Effect: Allow
+          Action:
+            - cloudformation:DescribeStacks
+            - cloudformation:DescribeStackResources
+            - cloudformation:DeleteStack
+          Resource: arn:aws:cloudformation:${aws:region}:${aws:accountId}:stack/service-*-formation/*
+        - Effect: Allow
+          Action: iam:PassRole
+          Resource:
+            Fn::GetAtt: [CfnExecutionRole, Arn]
+        # Swagger export of a generated API.
+        - Effect: Allow
+          Action: apigateway:GET
+          Resource: arn:aws:apigateway:${aws:region}::/restapis/*/stages/*/exports/*
+        # Cost Explorer has no resource-level permissions.
+        - Effect: Allow
+          Action: ce:GetCostAndUsage
           Resource: "*"
 
 plugins:
@@ -223,3 +295,207 @@ resources:
           - AttributeName: sk
             KeyType: RANGE
         BillingMode: "PAY_PER_REQUEST"
+
+    # Builds and deploys generated services (src/api/deployment/deploymentEvent.ts).
+    # The source and buildspec are supplied by each StartBuild call.
+    DeployProject:
+      Type: AWS::CodeBuild::Project
+      Properties:
+        Name: kanobi-deploy-${sls:stage}
+        ServiceRole:
+          Fn::GetAtt: [DeployProjectRole, Arn]
+        Artifacts:
+          Type: NO_ARTIFACTS
+        Source:
+          Type: NO_SOURCE
+          BuildSpec: "version: 0.2\nphases:\n  build:\n    commands:\n      - echo Source and buildspec come from StartBuild"
+        Environment:
+          Type: LINUX_CONTAINER
+          ComputeType: BUILD_GENERAL1_SMALL
+          Image: aws/codebuild/standard:7.0
+        LogsConfig:
+          CloudWatchLogs:
+            Status: ENABLED
+            GroupName: /aws/codebuild/kanobi-deploy-${sls:stage}
+        TimeoutInMinutes: 30
+
+    # What a build may do: read its source, publish the swagger file and run
+    # `sls deploy`. CloudFormation creates the service's resources with
+    # CfnExecutionRole, so this role cannot create Lambdas, tables or roles itself.
+    DeployProjectRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: codebuild.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: kanobi-deploy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogGroup
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                  Resource:
+                    - arn:aws:logs:${aws:region}:${aws:accountId}:log-group:/aws/codebuild/kanobi-deploy-${sls:stage}
+                    - arn:aws:logs:${aws:region}:${aws:accountId}:log-group:/aws/codebuild/kanobi-deploy-${sls:stage}:*
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                    - s3:GetObjectVersion
+                  Resource: arn:aws:s3:::${env:BUCKET_NAME}/*.zip
+                - Effect: Allow
+                  Action: s3:PutObject
+                  Resource: arn:aws:s3:::${env:BUCKET_NAME}/*/swagger-json.json
+                - Effect: Allow
+                  Action:
+                    - cloudformation:CreateStack
+                    - cloudformation:UpdateStack
+                    - cloudformation:DescribeStacks
+                    - cloudformation:DescribeStackEvents
+                    - cloudformation:DescribeStackResource
+                    - cloudformation:DescribeStackResources
+                    - cloudformation:ListStackResources
+                    - cloudformation:GetTemplate
+                    - cloudformation:CreateChangeSet
+                    - cloudformation:DescribeChangeSet
+                    - cloudformation:ExecuteChangeSet
+                    - cloudformation:DeleteChangeSet
+                  Resource: arn:aws:cloudformation:${aws:region}:${aws:accountId}:stack/service-*-formation/*
+                - Effect: Allow
+                  Action: cloudformation:ValidateTemplate
+                  Resource: "*"
+                - Effect: Allow
+                  Action: iam:PassRole
+                  Resource:
+                    Fn::GetAtt: [CfnExecutionRole, Arn]
+                # The framework uploads artifacts to the stack's deployment bucket
+                # and compares them with the deployed functions.
+                - Effect: Allow
+                  Action:
+                    - s3:ListBucket
+                    - s3:GetBucketLocation
+                    - s3:GetObject
+                    - s3:PutObject
+                    - s3:DeleteObject
+                  Resource:
+                    - arn:aws:s3:::service-*-serverlessdeploymentbuck*
+                    - arn:aws:s3:::service-*-serverlessdeploymentbuck*/*
+                - Effect: Allow
+                  Action:
+                    - lambda:GetFunction
+                    - lambda:ListVersionsByFunction
+                  Resource: arn:aws:lambda:${aws:region}:${aws:accountId}:function:service-*
+                - Effect: Allow
+                  Action: ssm:GetParameter
+                  Resource: arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/serverless-framework/*
+
+    # CloudFormation creates, updates and deletes generated services' resources
+    # with this role (provider.iam.deploymentRole in each generated serverless.yml).
+    # Names follow the generated patterns: service-<ID>-* for functions, roles and
+    # stacks, <id>-files buckets, <model>sTable<ID> tables.
+    CfnExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: cloudformation.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: kanobi-generated-services
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - s3:CreateBucket
+                    - s3:DeleteBucket
+                    - s3:ListBucket
+                    - s3:GetBucketLocation
+                    - s3:GetBucketPolicy
+                    - s3:PutBucketPolicy
+                    - s3:DeleteBucketPolicy
+                    - s3:PutBucketTagging
+                    - s3:PutBucketVersioning
+                    - s3:PutEncryptionConfiguration
+                    - s3:PutBucketPublicAccessBlock
+                    - s3:PutBucketOwnershipControls
+                    - s3:GetObject
+                  Resource:
+                    - arn:aws:s3:::*-files
+                    - arn:aws:s3:::service-*-serverlessdeploymentbuck*
+                    - arn:aws:s3:::service-*-serverlessdeploymentbuck*/*
+                - Effect: Allow
+                  Action:
+                    - lambda:CreateFunction
+                    - lambda:DeleteFunction
+                    - lambda:GetFunction
+                    - lambda:GetFunctionConfiguration
+                    - lambda:UpdateFunctionCode
+                    - lambda:UpdateFunctionConfiguration
+                    - lambda:PublishVersion
+                    - lambda:ListVersionsByFunction
+                    - lambda:AddPermission
+                    - lambda:RemovePermission
+                    - lambda:TagResource
+                    - lambda:UntagResource
+                    - lambda:ListTags
+                  Resource: arn:aws:lambda:${aws:region}:${aws:accountId}:function:service-*
+                - Effect: Allow
+                  Action:
+                    - iam:CreateRole
+                    - iam:DeleteRole
+                    - iam:GetRole
+                    - iam:PutRolePolicy
+                    - iam:GetRolePolicy
+                    - iam:DeleteRolePolicy
+                    - iam:TagRole
+                    - iam:UntagRole
+                    - iam:PassRole
+                  Resource: arn:aws:iam::${aws:accountId}:role/service-*
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogGroup
+                    - logs:DeleteLogGroup
+                    - logs:PutRetentionPolicy
+                    - logs:DeleteRetentionPolicy
+                    - logs:TagResource
+                    - logs:TagLogGroup
+                  Resource: arn:aws:logs:${aws:region}:${aws:accountId}:log-group:/aws/lambda/service-*
+                - Effect: Allow
+                  Action: logs:DescribeLogGroups
+                  Resource: "*"
+                - Effect: Allow
+                  Action:
+                    - apigateway:GET
+                    - apigateway:POST
+                    - apigateway:PUT
+                    - apigateway:PATCH
+                    - apigateway:DELETE
+                  Resource:
+                    - arn:aws:apigateway:${aws:region}::/restapis
+                    - arn:aws:apigateway:${aws:region}::/restapis/*
+                    - arn:aws:apigateway:${aws:region}::/tags/*
+                - Effect: Allow
+                  Action:
+                    - dynamodb:CreateTable
+                    - dynamodb:DeleteTable
+                    - dynamodb:DescribeTable
+                    - dynamodb:UpdateTable
+                    - dynamodb:TagResource
+                    - dynamodb:UntagResource
+                    - dynamodb:ListTagsOfResource
+                    - dynamodb:DescribeContinuousBackups
+                    - dynamodb:UpdateContinuousBackups
+                    - dynamodb:DescribeTimeToLive
+                    - dynamodb:UpdateTimeToLive
+                  Resource: arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/*sTable*

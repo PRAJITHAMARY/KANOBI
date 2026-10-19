@@ -45,8 +45,6 @@ services:
       SERVICE_TABLE: KanobiTable
       BUCKET_NAME: kanobi-local
       AWS_DEPLOY_REGION: eu-west-1
-      AWS_KEY: test
-      AWS_SECRET: test
       DYNAMODB_ENDPOINT: http://localstack:4566
       S3_ENDPOINT: http://localstack:4566
       AWS_ENDPOINT: http://localstack:4566

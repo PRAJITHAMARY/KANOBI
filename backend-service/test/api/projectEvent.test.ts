@@ -86,6 +86,11 @@ describe("projectCreatedHandler", () => {
       tags: { Service: "service-555555", Project: PROJECT_ID },
       stackTags: { Service: "service-555555", Project: PROJECT_ID },
     });
+    // CloudFormation creates and deletes the stack's resources with this role,
+    // so neither CodeBuild nor the control plane needs those permissions.
+    expect(doc.provider.iam.deploymentRole).toBe(
+      "arn:aws:iam::123456789012:role/kanobi-cfn-execution-test"
+    );
     const bucket = "11111111222233334444555555555555-files";
     expect(doc.resources.Resources["11111111222233334444555555555555Files"]).toMatchObject({
       Type: "AWS::S3::Bucket",
@@ -102,6 +107,32 @@ describe("projectCreatedHandler", () => {
       Key: { pk: `pr_${PROJECT_ID}`, sk: `pr_${PROJECT_ID}` },
       ExpressionAttributeValues: { ":stackName": "service-555555-formation" },
     });
+  });
+
+  it("leaves the deployment role out when deploying to LocalStack", async () => {
+    vi.stubEnv("DEPLOY_TARGET", "localstack");
+    vi.stubEnv("CFN_EXECUTION_ROLE_ARN", undefined);
+    givenProjectFiles(boilerplateYaml);
+
+    await expect(projectCreatedHandler({ id: PROJECT_ID, name: "shop" })).resolves.toBe(true);
+
+    const doc = yaml.load(uploaded()[`${PROJECT_ID}/serverless.yml`]) as any;
+    expect(doc.provider.iam.deploymentRole).toBeUndefined();
+  });
+
+  it("fails without CFN_EXECUTION_ROLE_ARN on AWS", async () => {
+    vi.stubEnv("CFN_EXECUTION_ROLE_ARN", undefined);
+    givenProjectFiles(boilerplateYaml);
+
+    await expect(projectCreatedHandler({ id: PROJECT_ID, name: "shop" })).resolves.toBeUndefined();
+
+    expect(uploaded()[`${PROJECT_ID}/serverless.yml`]).toBeUndefined();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.any(String),
+      "[ERROR]: ",
+      "PROJECTCREATEDHANDLER",
+      new Error("CFN_EXECUTION_ROLE_ARN is not set")
+    );
   });
 
   it("extends existing resources and S3 statements", async () => {

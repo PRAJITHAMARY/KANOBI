@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mockClient } from "aws-sdk-client-mock";
+import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 
-const { handled, invoke, configUpdate } = vi.hoisted(() => ({
+const { handled } = vi.hoisted(() => ({
   handled: [] as Array<{ name: string; payload: unknown }>,
-  invoke: vi.fn(),
-  configUpdate: vi.fn(),
 }));
 
 // Real handler modules do S3/codegen work; replace them with named recorders
@@ -44,19 +44,13 @@ vi.mock("../../src/api/deployment/deploymentEvent", () => ({
   },
 }));
 
-vi.mock("aws-sdk", () => ({
-  config: { update: configUpdate },
-  Lambda: class {
-    invoke = invoke;
-  },
-}));
-
 import { EventHub, LambdaEventHub, LocalEventHub } from "../../src/utils/eventhub";
+
+const lambda = mockClient(LambdaClient);
 
 beforeEach(() => {
   handled.length = 0;
-  invoke.mockReset();
-  configUpdate.mockReset();
+  lambda.reset();
 });
 
 describe("EventHub.Get", () => {
@@ -121,32 +115,42 @@ describe("LambdaEventHub", () => {
     ["model upated", "modelUpdatedHandler"],
     ["deployment triggered", "deploymentTriggeredHandler"],
   ])("invokes the Lambda for '%s' asynchronously", async (type, name) => {
-    invoke.mockReturnValue({ promise: () => Promise.resolve({}) });
+    lambda.on(InvokeCommand).resolves({ StatusCode: 202 });
 
     await expect(hub.publish({ type, payload: { id: 1 } })).resolves.toBe(true);
 
-    expect(configUpdate).toHaveBeenCalledWith({
-      region: "eu-west-1",
-      accessKeyId: "test-key",
-      secretAccessKey: "test-secret",
-    });
-    expect(invoke).toHaveBeenCalledWith({
+    const [call] = lambda.commandCalls(InvokeCommand);
+    expect(call.args[0].input).toEqual({
       FunctionName: `project-kanobi-test-${name}`,
-      Payload: JSON.stringify({ id: 1 }),
+      Payload: new TextEncoder().encode(JSON.stringify({ id: 1 })),
       InvocationType: "Event",
     });
   });
 
-  it("returns true when FunctionError is null", async () => {
-    invoke.mockReturnValue({ promise: () => Promise.resolve({ FunctionError: null }) });
+  it("uses the deploy region and the default credential chain (the Lambda role)", async () => {
+    vi.stubEnv("AWS_KEY", "static-key");
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "role-key");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "role-secret");
+    lambda.on(InvokeCommand).resolves({});
+
+    await new LambdaEventHub().publish({ type: "", payload: {} });
+
+    const client = lambda.commandCalls(InvokeCommand)[0].thisValue as LambdaClient;
+    expect(await client.config.region()).toBe("eu-west-1");
+    expect(await client.config.credentials()).toMatchObject({ accessKeyId: "role-key" });
+    vi.unstubAllEnvs();
+  });
+
+  it("returns true when FunctionError is missing", async () => {
+    lambda.on(InvokeCommand).resolves({});
     await expect(hub.publish({ type: "", payload: {} })).resolves.toBe(true);
-    expect(invoke.mock.calls[0][0].FunctionName).toBe("test-function-name");
+    expect(lambda.commandCalls(InvokeCommand)[0].args[0].input.FunctionName).toBe(
+      "test-function-name"
+    );
   });
 
   it("returns false when the invocation reports a FunctionError", async () => {
-    invoke.mockReturnValue({
-      promise: () => Promise.resolve({ FunctionError: "Unhandled" }),
-    });
+    lambda.on(InvokeCommand).resolves({ FunctionError: "Unhandled" });
     await expect(hub.publish({ type: "project created", payload: {} })).resolves.toBe(
       false
     );
@@ -156,6 +160,6 @@ describe("LambdaEventHub", () => {
     await expect(hub.publish({ type: "nope", payload: {} })).rejects.toBe(
       "nope Event handler not found"
     );
-    expect(invoke).not.toHaveBeenCalled();
+    expect(lambda.commandCalls(InvokeCommand)).toHaveLength(0);
   });
 });

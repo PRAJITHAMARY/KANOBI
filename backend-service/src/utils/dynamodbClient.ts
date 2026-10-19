@@ -5,15 +5,13 @@ import {
   DescribeTableCommand,
 } from "@aws-sdk/client-dynamodb";
 import { logError, logInfo } from "./logger";
+import { localEndpointConfig } from "./awsConfig";
 
 const client = new DynamoDBClient({
   region: process.env.NODE_ENV == "dev" ? "localhost" : process.env.AWS_DEPLOY_REGION,
-  endpoint:
-    process.env.NODE_ENV == "dev" ? process.env.DYNAMODB_ENDPOINT : undefined,
-  credentials: {
-    accessKeyId: `${process.env.AWS_KEY}`,
-    secretAccessKey: `${process.env.AWS_SECRET}`,
-  },
+  ...(process.env.NODE_ENV == "dev"
+    ? localEndpointConfig(process.env.DYNAMODB_ENDPOINT)
+    : {}),
 });
 
 export const docClient = DynamoDBDocumentClient.from(client);

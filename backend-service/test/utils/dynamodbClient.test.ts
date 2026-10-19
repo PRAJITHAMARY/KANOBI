@@ -39,6 +39,27 @@ describe("dynamodbClient", () => {
     });
   });
 
+  it("uses the default credential chain (the Lambda role) outside dev", async () => {
+    vi.stubEnv("AWS_KEY", "static-key");
+    vi.stubEnv("AWS_SECRET", "static-secret");
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "role-key");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "role-secret");
+    const { docClient } = await load("test");
+    expect(await docClient.config.credentials()).toMatchObject({
+      accessKeyId: "role-key",
+      secretAccessKey: "role-secret",
+    });
+  });
+
+  it("uses dummy credentials for the local endpoint in dev", async () => {
+    vi.stubEnv("AWS_KEY", "static-key");
+    const { docClient } = await load("dev");
+    expect(await docClient.config.credentials()).toMatchObject({
+      accessKeyId: "test",
+      secretAccessKey: "test",
+    });
+  });
+
   it("leaves an existing table alone", async () => {
     const { initDb } = await load("dev");
     dynamo.on(DescribeTableCommand).resolves({});
