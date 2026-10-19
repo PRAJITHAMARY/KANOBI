@@ -1,2 +1,3 @@
 # Optional overrides for docker-compose.yml (LOCALSTACK_IMAGE, LOCALSTACK_AUTH_TOKEN).
 .env
+figma-screenshot/
