@@ -3,6 +3,7 @@ import { ApiMethod, ApiSettings, AppModel } from "../types";
 import { logInfo } from "./logger";
 import { getTableName } from "./dynamodbHelpers";
 import { getServiceName } from "./infraHelper";
+import { assertSafeModel } from "./names";
 
 const setupAPI = (method: string, modelName: string) => {
   const api: ApiSettings = {
@@ -264,6 +265,7 @@ export const SetupAPIFunction = async (
   functions: any,
   projectId: string | undefined
 ) => {
+  assertSafeModel(model);
   logInfo(
     SetupAPIFunction.name,
     "Creating endpoints and handlers for " + model.name

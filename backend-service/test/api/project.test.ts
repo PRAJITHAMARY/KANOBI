@@ -59,25 +59,25 @@ describe.each([
       ddb.on(PutCommand).resolves({});
 
       const res = await CreateProject(
-        apiEvent({ body: { name: "Shop", description: "d" } }),
+        apiEvent({ body: { name: "shop", description: "d" } }),
         context
       );
 
       expect(res.statusCode).toBe(201);
-      expect(parseBody(res).data).toEqual({ id: "new-id", name: "Shop", description: "d" });
+      expect(parseBody(res).data).toEqual({ id: "new-id", name: "shop", description: "d" });
       expect(ddb.commandCalls(PutCommand)[0].args[0].input).toEqual({
         TableName: table,
         Item: {
           pk: "pr_new-id",
           sk: "pr_new-id",
           entityType: "Project",
-          name: "Shop",
+          name: "shop",
           description: "d",
         },
       });
       expect(publish).toHaveBeenCalledWith({
         type: "project created",
-        payload: { id: "new-id", name: "Shop", description: "d" },
+        payload: { id: "new-id", name: "shop", description: "d" },
       });
     });
 
@@ -88,9 +88,22 @@ describe.each([
       expect(ddb.calls()).toHaveLength(0);
     });
 
+    it.each(["x; rm -rf /", "$(whoami)", "My Shop", "shop\nphases:"])(
+      "rejects the unsafe name %j with a readable message",
+      async (name) => {
+        const res = await CreateProject(apiEvent({ body: { name } }), context);
+        expect(res.statusCode).toBe(400);
+        expect(parseBody(res).message).toBe(
+          "name: Project name can only contain lowercase letters, numbers and hyphens"
+        );
+        expect(ddb.calls()).toHaveLength(0);
+        expect(publish).not.toHaveBeenCalled();
+      }
+    );
+
     it("returns 500 on unexpected errors", async () => {
       ddb.on(PutCommand).rejects(new Error("db down"));
-      const res = await CreateProject(apiEvent({ body: { name: "Shop" } }), context);
+      const res = await CreateProject(apiEvent({ body: { name: "shop" } }), context);
       expect(res.statusCode).toBe(500);
     });
   });
@@ -239,29 +252,38 @@ describe.each([
       ddb.on(UpdateCommand).resolves({});
 
       const res = await PutProject(
-        apiEvent({ pathParameters: { id: "1" }, body: { name: "New name" } }),
+        apiEvent({ pathParameters: { id: "1" }, body: { name: "new-name" } }),
         context
       );
 
-      expect(parseBody(res).data).toEqual({ id: "1", name: "New name" });
+      expect(parseBody(res).data).toEqual({ id: "1", name: "new-name" });
       expect(ddb.commandCalls(UpdateCommand)[0].args[0].input).toEqual({
         TableName: table,
         Key: { pk: "pr_1", sk: "pr_1" },
         UpdateExpression: "set #name = :name",
         ExpressionAttributeNames: { "#name": "name" },
-        ExpressionAttributeValues: { ":name": "New name" },
+        ExpressionAttributeValues: { ":name": "new-name" },
       });
     });
 
     it("rejects an invalid body", async () => {
       const res = await PutProject(apiEvent({ body: { name: "x" } }), context);
       expect(res.statusCode).toBe(400);
+      expect(parseBody(res).message).toBe(
+        "name: Project name must be at least 3 characters"
+      );
+      const unsafe = await PutProject(
+        apiEvent({ pathParameters: { id: "1" }, body: { name: "a; curl evil" } }),
+        context
+      );
+      expect(unsafe.statusCode).toBe(400);
+      expect(ddb.calls()).toHaveLength(0);
       expect((await PutProject(apiEvent(), context)).statusCode).toBe(400);
     });
 
     it("returns 500 on errors", async () => {
       ddb.on(UpdateCommand).rejects(new Error("x"));
-      const res = await PutProject(apiEvent({ body: { name: "Valid" } }), context);
+      const res = await PutProject(apiEvent({ body: { name: "valid" } }), context);
       expect(res.statusCode).toBe(500);
     });
   });

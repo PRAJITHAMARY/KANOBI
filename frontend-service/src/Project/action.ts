@@ -1,4 +1,5 @@
 import { API_URL } from "../config";
+import { responseErrorMessage } from "../validation";
 
 export const projectAction = async ({ request }: { request: Request }) => {
   const formData = await request.formData();
@@ -15,6 +16,14 @@ export const projectAction = async ({ request }: { request: Request }) => {
           body: JSON.stringify({ name, description }),
         }
       );
+
+      if (!response.ok) {
+        return {
+          success: false,
+          action,
+          error: await responseErrorMessage(response),
+        };
+      }
 
       const resData = await response.json();
 
@@ -37,7 +46,7 @@ export const projectAction = async ({ request }: { request: Request }) => {
       const id = formData.get("id");
       const name = formData.get("name");
       const description = formData.get("description");
-      
+
       const response = await fetch(
         `${API_URL}/project/${id}`,
         {
@@ -45,6 +54,15 @@ export const projectAction = async ({ request }: { request: Request }) => {
           body: JSON.stringify({ name, description }),
         }
       );
+
+      if (!response.ok) {
+        return {
+          success: false,
+          action,
+          id,
+          error: await responseErrorMessage(response),
+        };
+      }
 
       return { success: true, data: response.status };
     }

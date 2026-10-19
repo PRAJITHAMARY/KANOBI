@@ -5,7 +5,7 @@ export const getTableName = (
   modelName: string
 ): string => {
   return (
-    modelName.trim().replace(" ", "").toLowerCase() +
+    modelName.replace(/\s+/g, "").toLowerCase() +
     "sTable" +
     getResourceName(projectId).substring(26).toUpperCase()
   );

@@ -16,6 +16,8 @@ describe("dynamodbHelpers", () => {
       "useraccountsTable555555"
     );
     expect(getTableName(undefined, "Post")).toBe("postsTable");
+    // Every space is removed, not only the first (legacy names may contain several).
+    expect(getTableName(undefined, "Order  Line Item")).toBe("orderlineitemsTable");
   });
 
   it("getNodeName slugs names", () => {

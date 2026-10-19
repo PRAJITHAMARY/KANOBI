@@ -4,15 +4,15 @@ import { describe, expect, it } from "vitest";
 import ProjectCard from "./ProjectCard";
 import { renderWithRouter } from "../test/utils";
 
-const project = { id: "1", name: "Shop", description: "Online shop", stackName: "service-1" };
+const project = { id: "1", name: "shop", description: "Online shop", stackName: "service-1" };
 
-const renderCard = (actionResult: unknown = { success: true }) => {
+const renderCard = (actionResult: unknown = { success: true }, cardProject = project) => {
   const submissions: Record<string, FormDataEntryValue>[] = [];
   const result = renderWithRouter(
     [
       {
         path: "/project",
-        element: <ProjectCard project={project} />,
+        element: <ProjectCard project={cardProject} />,
         action: async ({ request }) => {
           submissions.push(Object.fromEntries(await request.formData()));
           return actionResult;
@@ -44,7 +44,7 @@ describe("ProjectCard", () => {
     await userEvent.click(screen.getByRole("button", { name: "Edit project" }));
     expect(screen.getByRole("heading", { name: "Edit Project" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Delete project" }));
-    expect(screen.getByRole("heading", { name: "Delete Shop" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Delete shop" })).toBeInTheDocument();
   });
 
   it("edits the project and closes the dialog on success", async () => {
@@ -52,17 +52,17 @@ describe("ProjectCard", () => {
 
     fireEvent.click(icon("clipboard-pen"));
     const name = screen.getByPlaceholderText("Project name");
-    expect(name).toHaveValue("Shop");
+    expect(name).toHaveValue("shop");
 
     await userEvent.clear(name);
-    await userEvent.type(name, "Store");
+    await userEvent.type(name, "store");
     await userEvent.clear(screen.getByPlaceholderText("description"));
     await userEvent.type(screen.getByPlaceholderText("description"), "New desc");
     await userEvent.click(screen.getByRole("button", { name: "Update" }));
 
     await waitFor(() => expect(submissions).toHaveLength(1));
     expect(submissions[0]).toEqual({
-      name: "Store",
+      name: "store",
       description: "New desc",
       id: "1",
       action: "put",
@@ -72,14 +72,59 @@ describe("ProjectCard", () => {
     );
   });
 
-  it("keeps the edit dialog open when the update fails", async () => {
-    const { icon, submissions } = renderCard({ success: false });
+  it("keeps the edit dialog open with the API error, and clears it when reopened", async () => {
+    const { icon, submissions } = renderCard({
+      success: false,
+      action: "put",
+      id: "1",
+      error: "name: taken",
+    });
+
+    fireEvent.click(icon("clipboard-pen"));
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(submissions).toHaveLength(1));
+    expect(await screen.findByRole("alert")).toHaveTextContent("name: taken");
+    expect(screen.getByRole("heading", { name: "Edit Project" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(icon("clipboard-pen"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("ignores update errors for other projects", async () => {
+    const { icon, submissions } = renderCard({
+      success: false,
+      action: "put",
+      id: "2",
+      error: "name: taken",
+    });
 
     fireEvent.click(icon("clipboard-pen"));
     await userEvent.click(screen.getByRole("button", { name: "Update" }));
 
     await waitFor(() => expect(submissions).toHaveLength(1));
     expect(screen.getByRole("heading", { name: "Edit Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("asks for a valid name before updating a project saved under the old rules", async () => {
+    const { icon, submissions } = renderCard(undefined, { ...project, name: "My Shop" });
+
+    fireEvent.click(icon("clipboard-pen"));
+    const name = screen.getByRole("textbox", { name: "Project name" });
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    expect(name).toHaveAccessibleDescription(
+      "Project name can only contain lowercase letters, numbers and hyphens"
+    );
+    expect(submissions).toEqual([]);
+
+    await userEvent.clear(name);
+    await userEvent.type(name, "my-shop");
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+    await waitFor(() => expect(submissions).toHaveLength(1));
+    expect(submissions[0]).toMatchObject({ name: "my-shop" });
   });
 
   it("closes the edit dialog from Cancel and ✕", async () => {
@@ -88,25 +133,24 @@ describe("ProjectCard", () => {
     fireEvent.click(icon("clipboard-pen"));
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("heading", { name: "Edit Project" })).not.toBeInTheDocument();
-    // Documents current behaviour: Cancel has no type="button", so it also submits the form.
-    await waitFor(() =>
-      expect(submissions).toEqual([{ name: "Shop", description: "Online shop", id: "1" }])
-    );
+    // Cancel is type="button", so it never submits the form.
+    expect(submissions).toEqual([]);
 
     fireEvent.click(icon("clipboard-pen"));
     await userEvent.click(screen.getByRole("button", { name: "✕" }));
     expect(screen.queryByRole("heading", { name: "Edit Project" })).not.toBeInTheDocument();
+    expect(submissions).toEqual([]);
   });
 
   it("submits a delete after confirmation", async () => {
     const { icon, submissions } = renderCard();
 
     fireEvent.click(icon("x"));
-    expect(screen.getByRole("heading", { name: "Delete Shop" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Delete shop" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Proceed" }));
 
     await waitFor(() => expect(submissions).toEqual([{ projectId: "1", action: "delete" }]));
-    expect(screen.queryByRole("heading", { name: "Delete Shop" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Delete shop" })).not.toBeInTheDocument();
   });
 
   it("closes the delete dialog from Close and ✕ without submitting", async () => {
@@ -114,11 +158,11 @@ describe("ProjectCard", () => {
 
     fireEvent.click(icon("x"));
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("heading", { name: "Delete Shop" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Delete shop" })).not.toBeInTheDocument();
 
     fireEvent.click(icon("x"));
     await userEvent.click(screen.getByRole("button", { name: "✕" }));
-    expect(screen.queryByRole("heading", { name: "Delete Shop" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Delete shop" })).not.toBeInTheDocument();
     expect(submissions).toEqual([]);
   });
 });

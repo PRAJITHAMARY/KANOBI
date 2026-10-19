@@ -71,7 +71,7 @@ export async function CreateProject(
     return ResponseManager.CreatedResponse(response);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
     return ResponseManager.InternalErrorResponse(CreateProject.name, error);
@@ -255,7 +255,7 @@ export async function PutProject(
     return ResponseManager.OkResponse(item);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
     return ResponseManager.InternalErrorResponse(GetProjects.name, error);

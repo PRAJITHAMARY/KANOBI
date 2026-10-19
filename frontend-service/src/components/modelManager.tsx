@@ -1,5 +1,11 @@
 import { useState } from "react";
 import { API_URL } from "../config";
+import FormBanner from "./FormBanner";
+import {
+  modelNameError,
+  propertyNameError,
+  responseErrorMessage,
+} from "../validation";
 
 type Project = {
   id: string;
@@ -47,11 +53,31 @@ export default function ModelManager({
   const [newModelName, setNewModelName] = useState("");
   const [newModelDesc, setNewModelDesc] = useState("");
   const [relToDelete, setRelToDelete] = useState<Relationship[]>([]);
+  const [addError, setAddError] = useState<string>();
+  const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
+  const [deployError, setDeployError] = useState<string>();
+
+  const otherModelNames = (id?: string) =>
+    models.filter((m) => m.id !== id).map((m) => m.name);
+
+  const newModelError = newModelName.trim()
+    ? modelNameError(newModelName.trim(), otherModelNames())
+    : undefined;
+
+  const modelErrors = (model: Model) => ({
+    name: modelNameError(model.name, otherModelNames(model.id)),
+    properties: model.properties.map((p, i) =>
+      propertyNameError(
+        p.name,
+        model.properties.filter((_, j) => j !== i).map((o) => o.name)
+      )
+    ),
+  });
 
   const addModel = async () => {
     // Unreachable from the UI (the button is disabled); kept as a guard.
     /* v8 ignore if -- @preserve */
-    if (!newModelName.trim()) return;
+    if (!newModelName.trim() || newModelError) return;
 
     const newModel = {
       name: newModelName.trim(),
@@ -69,10 +95,12 @@ export default function ModelManager({
 
     if (res.ok) {
       const responseData = await res.json();
-      console.log(responseData);
       setModels((prev) => [...prev, responseData.data]);
       setNewModelName("");
       setNewModelDesc("");
+      setAddError(undefined);
+    } else {
+      setAddError(await responseErrorMessage(res));
     }
   };
 
@@ -321,6 +349,12 @@ export default function ModelManager({
       }
     );
 
+    const failed = !res.ok ? res : !res1.ok ? res1 : undefined;
+    if (failed) {
+      const message = await responseErrorMessage(failed);
+      setSaveErrors((prev) => ({ ...prev, [modelId]: message }));
+    }
+
     if (res.ok && res1.ok) {
       setModels((prev) =>
         prev.map((m) =>
@@ -349,24 +383,37 @@ export default function ModelManager({
     );
 
     if (res.ok) {
+      setDeployError(undefined);
       alert("Redeployment in progress... Refresh page to see logs");
       window.location.reload();
+    } else {
+      setDeployError(await responseErrorMessage(res));
     }
   };
-
-  console.log(relToDelete);
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-8 font-sans">
       <section className="border p-4 rounded shadow space-y-4 bg-gray-900">
         <h2 className="text-xl font-semibold">Add New Model</h2>
-        <input
-          type="text"
-          placeholder="Model name"
-          value={newModelName}
-          onChange={(e) => setNewModelName(e.target.value)}
-          className="border rounded px-3 py-2 w-full"
-        />
+        <FormBanner message={addError} />
+        <div>
+          <input
+            type="text"
+            placeholder="Model name"
+            aria-label="New model name"
+            aria-invalid={newModelError ? true : undefined}
+            aria-describedby="new-model-name-hint"
+            value={newModelName}
+            onChange={(e) => setNewModelName(e.target.value)}
+            className="border rounded px-3 py-2 w-full aria-invalid:border-red-500"
+          />
+          <p
+            id="new-model-name-hint"
+            className={`text-sm mt-1 ${newModelError ? "text-red-400" : "text-gray-400"}`}
+          >
+            {newModelError ?? "PascalCase, e.g. Product or OrderItem."}
+          </p>
+        </div>
         <textarea
           placeholder="Description (optional)"
           value={newModelDesc}
@@ -377,29 +424,43 @@ export default function ModelManager({
         <button
           onClick={addModel}
           className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
-          disabled={!newModelName.trim()}
+          disabled={!newModelName.trim() || !!newModelError}
         >
           Add Model
         </button>
       </section>
 
       <section className="space-y-6">
-        {models.map((model) => (
+        {models.map((model) => {
+          const errors = modelErrors(model);
+          const hasErrors =
+            !!errors.name || errors.properties.some((e) => e !== undefined);
+          return (
           <div
             key={model.id}
             data-testid="model-card"
             className="border rounded p-4 shadow bg-gray-900 space-y-4"
           >
+            <FormBanner message={saveErrors[model.id]} />
             {/* Model Header: name + description + delete */}
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div className="flex flex-col md:flex-row md:gap-4 md:items-center flex-1">
-                <input
-                  type="text"
-                  value={model.name}
-                  onChange={(e) => editModel(model.id, "name", e.target.value)}
-                  className="font-semibold text-lg border-b focus:outline-none flex-1"
-                  placeholder="Model Name"
-                />
+                <div className="flex-1">
+                  <input
+                    type="text"
+                    value={model.name}
+                    onChange={(e) => editModel(model.id, "name", e.target.value)}
+                    className="font-semibold text-lg border-b focus:outline-none w-full aria-invalid:border-red-500"
+                    placeholder="Model Name"
+                    aria-invalid={errors.name ? true : undefined}
+                    aria-describedby={errors.name ? `${model.id}-name-error` : undefined}
+                  />
+                  {errors.name && (
+                    <p id={`${model.id}-name-error`} className="text-sm text-red-400 mt-1">
+                      {errors.name}
+                    </p>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={model.description}
@@ -466,9 +527,23 @@ export default function ModelManager({
                           onChange={(e) =>
                             editProperty(model.id, idx, "name", e.target.value)
                           }
-                          className="w-full border rounded px-1 py-0.5"
+                          className="w-full border rounded px-1 py-0.5 aria-invalid:border-red-500"
                           placeholder="Property name"
+                          aria-invalid={errors.properties[idx] ? true : undefined}
+                          aria-describedby={
+                            errors.properties[idx]
+                              ? `${model.id}-property-${idx}-error`
+                              : undefined
+                          }
                         />
+                        {errors.properties[idx] && (
+                          <p
+                            id={`${model.id}-property-${idx}-error`}
+                            className="text-sm text-red-400 mt-1"
+                          >
+                            {errors.properties[idx]}
+                          </p>
+                        )}
                       </td>
                       <td className="border border-gray-300 px-2 py-1">
                         <select
@@ -628,7 +703,7 @@ export default function ModelManager({
 
                 <button
                   onClick={() => pushModelUpdate(model.id)}
-                  disabled={!model.changed}
+                  disabled={!model.changed || hasErrors}
                   className="mt-2 bg-blue-600 text-white px-3 py-1 rounded hover:bg-green-700 flex-end"
                 >
                   Push Update
@@ -636,8 +711,10 @@ export default function ModelManager({
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </section>
+      <FormBanner message={deployError} />
       <section className="flex justify-center gap-38">
         <button
           onClick={() => redeployChanges()}

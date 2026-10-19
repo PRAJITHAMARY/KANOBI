@@ -40,7 +40,7 @@ const project = {
   pk: "pr_p1",
   sk: "pr_p1",
   entityType: "Project",
-  name: "Shop",
+  name: "shop",
   description: "desc",
   stackName: "service-1-formation",
 };
@@ -196,7 +196,7 @@ describe.each([
       expect(doc.servers).toEqual([
         { url: "https://stored", description: "This is the prod server" },
       ]);
-      expect(doc.info.title).toBe("API documentation for Shop");
+      expect(doc.info.title).toBe("API documentation for shop");
       expect(doc.info.description).toContain("project description: desc");
     });
 
@@ -286,7 +286,7 @@ describe.each([
         type: "deployment triggered",
         payload: {
           projectId: "p1",
-          projectName: "Shop",
+          projectName: "shop",
           model: expect.objectContaining({ id: "dep-id" }),
         },
       });
@@ -324,6 +324,47 @@ describe.each([
 
     it("rejects an invalid body", async () => {
       expect((await TriggerDeployment(apiEvent(), context)).statusCode).toBe(400);
+    });
+
+    const model = (name: string, properties: unknown[] = []) => ({
+      pk: "pr_p1",
+      sk: `ml_${name}`,
+      entityType: "Model",
+      name,
+      properties,
+    });
+
+    it.each([
+      [
+        "an unsafe project name",
+        [{ ...project, name: "Shop; rm -rf /" }],
+        "Rename the project before deploying: Project name can only contain lowercase letters, numbers and hyphens",
+      ],
+      [
+        "an unsafe model name",
+        [project, model("User"), model("order item")],
+        'Rename model "order item" before deploying: Model name must be PascalCase',
+      ],
+      [
+        "an unsafe field",
+        [project, model("User", [{ name: "first name", type: "string", required: true }])],
+        'Rename model "User" before deploying: Field name must be camelCase',
+      ],
+    ])("refuses to deploy %s saved before the name rules", async (_case, items, message) => {
+      ddb.on(QueryCommand).resolves({ Items: items });
+      const res = await TriggerDeployment(event, context);
+      expect(res.statusCode).toBe(400);
+      expect(parseBody(res).message).toContain(message);
+      expect(ddb.commandCalls(PutCommand)).toHaveLength(0);
+      expect(publish).not.toHaveBeenCalled();
+    });
+
+    it("deploys a project whose models follow the rules", async () => {
+      ddb.on(QueryCommand).resolves({
+        Items: [project, model("User", [{ name: "email", type: "string", required: true }])],
+      });
+      ddb.on(PutCommand).resolves({});
+      expect((await TriggerDeployment(event, context)).statusCode).toBe(200);
     });
 
     it.each([[{}], [{ Items: [] }]])("returns 404 for an unknown project %#", async (result) => {

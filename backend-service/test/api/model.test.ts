@@ -133,6 +133,59 @@ describe.each([
       expect(parseBody(res).data).toBe("Model already exists in project");
     });
 
+    it("treats names that differ only in case as duplicates", async () => {
+      ddb.on(QueryCommand).resolves({ Items: [modelItem("m0", "USER")] });
+      const res = await CreateModel(
+        apiEvent({ body, pathParameters: { projectId: PROJECT_ID } }),
+        context
+      );
+      expect(res.statusCode).toBe(400);
+      expect(parseBody(res).message).toBe("A model named USER already exists");
+      expect(ddb.commandCalls(PutCommand)).toHaveLength(0);
+    });
+
+    it.each([
+      [{ ...body, name: "user" }, "name: Model name must be PascalCase"],
+      [{ ...body, name: "User*/ x" }, "name: Model name must be PascalCase"],
+      [
+        { ...body, properties: [{ name: "e: 1\n", type: "string", required: true }] },
+        "properties.0.name: Field name must be camelCase",
+      ],
+      [
+        { ...body, properties: [{ name: "email", type: "object", required: true }] },
+        "properties.0.type: Field type must be one of string, number, boolean",
+      ],
+    ])("rejects unsafe names and types %#", async (badBody, message) => {
+      const res = await CreateModel(
+        apiEvent({ body: badBody, pathParameters: { projectId: PROJECT_ID } }),
+        context
+      );
+      expect(res.statusCode).toBe(400);
+      expect(parseBody(res).message).toContain(message);
+      expect(ddb.calls()).toHaveLength(0);
+      expect(publish).not.toHaveBeenCalled();
+    });
+
+    it("rejects property names that differ only in case", async () => {
+      const res = await CreateModel(
+        apiEvent({
+          body: {
+            name: "User",
+            properties: [
+              { name: "email", type: "string", required: true },
+              { name: "eMail", type: "string", required: true },
+            ],
+          },
+          pathParameters: { projectId: PROJECT_ID },
+        }),
+        context
+      );
+      expect(res.statusCode).toBe(400);
+      expect(parseBody(res).message).toBe(
+        "properties: Duplicate property names are not allowed."
+      );
+    });
+
     it("rejects duplicate property names", async () => {
       const res = await CreateModel(
         apiEvent({
@@ -303,6 +356,50 @@ describe.each([
       ddb.on(UpdateCommand).rejects(new Error("x"));
       const res = await handler(apiEvent({ pathParameters: ids, body: validBody }), context);
       expect(res.statusCode).toBe(500);
+    });
+  });
+
+  describe("PutModel renames", () => {
+    const rename = (name: string) =>
+      PutModel(
+        apiEvent({
+          pathParameters: ids,
+          body: { name, properties: [{ name: "a", type: "string", required: true }] },
+        }),
+        context
+      );
+
+    it("rejects a rename onto another model's name in any case", async () => {
+      ddb.on(QueryCommand).resolves({
+        Items: [modelItem("m1", "User"), modelItem("m2", "Post")],
+      });
+      const res = await rename("POST");
+      expect(res.statusCode).toBe(400);
+      expect(parseBody(res).message).toBe("A model named Post already exists");
+      expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+      expect(publish).not.toHaveBeenCalled();
+      expect(ddb.commandCalls(QueryCommand)[0].args[0].input).toMatchObject({
+        TableName: tableEnv,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: { ":pk": PK },
+      });
+    });
+
+    it("ignores the model's own row and non-model rows", async () => {
+      // Fresh rows per call: the handler mutates the items it returns.
+      ddb.on(QueryCommand).callsFake(() => ({
+        Items: [{ pk: PK, sk: PK, entityType: "Project", name: "Account" }, modelItem("m1", "User")],
+      }));
+      ddb.on(UpdateCommand).resolves({});
+      expect((await rename("USER")).statusCode).toBe(200);
+      expect((await rename("Account")).statusCode).toBe(200);
+    });
+
+    it("rejects an unsafe name before touching the table", async () => {
+      const res = await rename("User; rm -rf /");
+      expect(res.statusCode).toBe(400);
+      expect(parseBody(res).message).toContain("Model name must be PascalCase");
+      expect(ddb.calls()).toHaveLength(0);
     });
   });
 
