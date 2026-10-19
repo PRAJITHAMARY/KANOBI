@@ -53,7 +53,7 @@ export const projectCreatedHandler = async (payload: ProjectCreatedPayload) => {
     logInfo(projectCreatedHandler.name, "Created project!");
     return true;
   } catch (error) {
-    logError(projectCreatedHandler.name, error);
+    logError(projectDeletedHandler.name, error);
   }
 };
 

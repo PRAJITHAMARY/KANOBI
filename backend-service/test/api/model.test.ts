@@ -275,7 +275,7 @@ describe.each([
         )
       );
       expect(publish).toHaveBeenCalledWith({
-        type: "model upated",
+        type: "model updated",
         payload: { models: [stored], projectId: PROJECT_ID },
       });
     });

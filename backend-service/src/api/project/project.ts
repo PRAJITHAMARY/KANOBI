@@ -117,7 +117,7 @@ export async function GetProjects(
           : undefined,
     });
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetProjects.name, error);
+       return ResponseManager.InternalErrorResponse(GetProjects.name, error);
   }
 }
 
@@ -220,7 +220,7 @@ export async function GetOneProject(
       models: models,
     });
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetProjects.name, error);
+     return ResponseManager.InternalErrorResponse(GetOneProject.name, error);
   }
 }
 
@@ -258,7 +258,7 @@ export async function PutProject(
       return ResponseManager.BadRequestResponse(error.errors);
     }
 
-    return ResponseManager.InternalErrorResponse(GetProjects.name, error);
+     return ResponseManager.InternalErrorResponse(PutProject.name, error);
   }
 }
 
@@ -333,6 +333,6 @@ export async function DeleteProject(event: any): Promise<any> {
 
     return ResponseManager.NoContentResponse();
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetProjects.name, error);
+       return ResponseManager.InternalErrorResponse(DeleteProject.name, error);
   }
 }

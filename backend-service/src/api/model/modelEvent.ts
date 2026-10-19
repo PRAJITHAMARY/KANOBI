@@ -13,7 +13,7 @@ import { getServiceName } from "../../utils/infraHelper";
 
 export const MODEL_CREATED = "model created";
 export const MODEL_DELETED = "model deleted";
-export const MODEL_UPDATED = "model upated";
+export const MODEL_UPDATED = "model updated";
 
 export interface ModelCreatedPayload {
   projectId: string | undefined;
@@ -170,7 +170,7 @@ export const modelDeletedHandler = async (payload: ModelDeletedPayload) => {
   await uploadFile(indexKey, indexSource.getFullText());
   await uploadFile(yamlKey, yaml.dump(doc));
 
-  logInfo(modelCreatedHandler.name, "Deleted model!");
+  logInfo(modelDeletedHandler.name, "Deleted model!");
 };
 
 export const modelUpdatedHandler = async (payload: ModelUpdatedPayload) => {
@@ -227,5 +227,5 @@ export const modelUpdatedHandler = async (payload: ModelUpdatedPayload) => {
   await uploadFile(indexKey, indexSource.getFullText());
   await uploadFile(yamlKey, yaml.dump(doc));
 
-  logInfo(modelCreatedHandler.name, "Updated model!");
+  logInfo(modelUpdatedHandler.name, "Updated model!");
 };

@@ -42,9 +42,9 @@ Tests currently **document** the existing behaviour for the bugs below; fixing a
 - [ ] **`GetProjects` pagination is broken.** `Limit` applies before the `entityType` filter, so pages can be empty while `hasMore` is true. `nextPageToken` rebuilds `sk` from `pk`, which is wrong when the last evaluated item is a model or deployment row.
 - [ ] **`CreateModelRelations` leaves stale back-references.** It replaces the main model's relations with the request body, but models dropped from the list keep their back-reference.
 - [ ] **`LocalEventHub.publish` doesn't return after rejecting an unknown event**, so it goes on to dereference `undefined` (`eventhub.ts:64`).
-- [ ] **Wrong names in error logs.** `GetOneProject`/`PutProject`/`DeleteProject` log as `GetProjects`, model handlers log as `GetModels`, `projectDeletedHandler` logs as `projectCreatedHandler`, and model delete/update log as `modelCreatedHandler`.
-- [ ] **Typo in `MODEL_UPDATED`:** `"model upated"` (harmless, but it is part of the event contract).
-- [ ] **`uuid` isn't declared in `backend-service/package.json`.** It only resolves because another package depends on it.
+- [x] **Wrong names in error logs.** `GetOneProject`/`PutProject`/`DeleteProject` log as `GetProjects`, model handlers log as `GetModels`, `projectDeletedHandler` logs as `projectCreatedHandler`, and model delete/update log as `modelCreatedHandler`.
+- [ x] **Typo in `MODEL_UPDATED`:** `"model upated"` (harmless, but it is part of the event contract).
+- [ x] **`uuid` isn't declared in `backend-service/package.json`.** It only resolves because another package depends on it.
 - [ ] **Outdated runtimes.** The control plane runs on `nodejs18.x` (end of life on Lambda), the generated services on `nodejs20.x`, and the buildspec installs `serverless@3` while the repo uses v4.
 - [ ] **Unreachable guard in `deploymentEvent.ts`.** It checks `if (!response)` after `zipFolder`, which only ever resolves `true` or rejects. It is excluded from coverage with a `v8 ignore` hint.
 
