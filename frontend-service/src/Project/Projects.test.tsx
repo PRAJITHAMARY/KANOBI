@@ -59,7 +59,11 @@ describe("Projects", () => {
     await waitFor(() =>
       expect(screen.queryByRole("heading", { name: "New Project" })).not.toBeInTheDocument()
     );
-    expect(screen.getByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Dashboard" })
+      ).toBeInTheDocument()
+    );
   });
 
   it("closes the dialog from the ✕ and Cancel buttons", async () => {
