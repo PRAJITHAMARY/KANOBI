@@ -155,6 +155,7 @@ npm run test:e2e:report     # open the last HTML report
 | Backend | every PR, push to `main`, manual | `typecheck` → `build` → `test:coverage` |
 | Frontend | every PR, push to `main`, manual | `lint` (non-blocking for now) → `build` → `test:coverage` |
 | E2E | push to `main` and manual runs only | Playwright against the Docker stack |
+| Workflow scripts | every PR, push to `main`, manual | `node --test` for `.github/scripts/` (100% coverage) |
 
 E2E is slow, so it doesn't run automatically on PRs. To run it for a branch, use **Actions → CI → Run workflow**, or:
 
@@ -163,6 +164,23 @@ gh workflow run CI --ref <branch>
 ```
 
 Coverage reports, the frontend build and the Playwright report (with traces and videos of failed tests) are attached to each run as artifacts. Download them from the run's summary page, or with `gh run download <run-id> -n playwright-report`.
+
+### Wiki update issues
+
+The [wiki](https://github.com/NdubuisiJr/Kanobi/wiki) documents the code, so it has to follow code changes. When a PR is merged into `main`, [`.github/workflows/wiki-update-issues.yml`](.github/workflows/wiki-update-issues.yml) checks what it changed. If the change is significant, it opens an issue labelled `documentation` that lists the wiki pages to review, the files behind each one, and a checklist.
+
+A change counts as significant when it:
+- touches a **key file**: `serverless.yml`, DTOs and naming rules, codegen or the boilerplate, Docker or env setup, test infrastructure or workflows, or the frontend routes
+- adds, removes or renames source files
+- changes at least **50 lines** in documented code (`WIKI_MIN_CHANGED_LINES`)
+
+Tests, lockfiles and Markdown don't count.
+
+[`.github/scripts/wiki-impact.js`](.github/scripts/wiki-impact.js) holds the rules: which paths map to which pages, and which files are key. To skip the check, add the `skip-wiki` label or write `[skip wiki]` in the PR description. To preview the issue for any PR without opening it, run the workflow by hand:
+
+```bash
+gh workflow run "Wiki update issues" -f pr_number=<n> -f dry_run=true
+```
 
 ## Deploying to AWS
 

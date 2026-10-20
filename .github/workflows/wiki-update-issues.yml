@@ -1,0 +1,61 @@
+name: Wiki update issues
+
+# When a PR merged into main changes code that the wiki documents, open an
+# issue listing the wiki pages to review. The rules (which paths map to which
+# pages, and what counts as a significant change) are in
+# .github/scripts/wiki-impact.js.
+#
+# pull_request_target (not pull_request) so PRs from forks also get a token that
+# can open issues. It runs the workflow and script from main and never checks
+# out or runs the PR's code: it only reads the PR's file list through the API.
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+  # Re-check a PR by hand, e.g. after changing the rules. Dry runs only write
+  # the issue to the job summary.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to check
+        required: true
+        type: number
+      dry_run:
+        description: Show the issue in the job summary instead of opening it
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: wiki-update-${{ github.event.pull_request.number || inputs.pr_number }}
+
+jobs:
+  open-issue:
+    name: Open wiki update issue
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Only the script, from the base branch (the default ref for pull_request_target).
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - uses: actions/github-script@v8
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          # Lines changed in documented files that need a wiki review. Changes
+          # to key files (routes, schemas, codegen, setup, CI) always count.
+          WIKI_MIN_CHANGED_LINES: "50"
+        with:
+          script: |
+            const { run } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/wiki-impact.js`);
+            await run({ github, context, core });

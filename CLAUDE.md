@@ -78,6 +78,13 @@ CI (`.github/workflows/ci.yml`) runs on pushes to `main`, on PRs and on manual r
 
 Coverage reports are uploaded as artifacts. A coverage threshold failure fails the job.
 
+A fourth CI job, **Workflow scripts**, runs `node --test` with 100% coverage thresholds over `.github/scripts/*.test.js`. Scripts that workflows run go in `.github/scripts/`, with a test file next to each one.
+
+**Wiki update issues** (`.github/workflows/wiki-update-issues.yml`): when a PR is merged into `main`, it opens an issue (label `documentation`) listing the [wiki](https://github.com/NdubuisiJr/Kanobi/wiki) pages to review. It does this only when the change is significant: a key file changed, source files were added, removed or renamed, or at least 50 documented lines changed. The path → page rules are in `.github/scripts/wiki-impact.js`. When you add a source area or a wiki page, update `RULES` there along with its tests.
+- **Trigger:** `pull_request_target`, so fork PRs can open issues too. It never checks out PR code.
+- **Opt out:** the `skip-wiki` label, or `[skip wiki]` in the PR description.
+- **Manual runs:** `workflow_dispatch` takes `pr_number`, and `dry_run` writes the issue to the job summary instead of opening it.
+
 ### Testing rules (mandatory)
 
 Coverage must stay at 100% in both packages, and every user-facing feature needs an e2e flow. Treat these as part of the definition of done for any change:
