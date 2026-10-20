@@ -18,6 +18,25 @@ env:
   NODE_VERSION: "22"
 
 jobs:
+  # Tests for the scripts that workflows run (e.g. wiki-update-issues.yml).
+  scripts:
+    name: Workflow scripts (tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # Same 100% thresholds as the packages; test files themselves are excluded.
+      - name: Test with coverage
+        run: >-
+          node --test --experimental-test-coverage
+          --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100
+          --test-coverage-exclude='**/*.test.js'
+          '.github/scripts/*.test.js'
+
   backend:
     name: Backend (build + tests)
     runs-on: ubuntu-latest
