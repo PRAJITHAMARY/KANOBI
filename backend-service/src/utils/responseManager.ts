@@ -1,16 +1,24 @@
 import { ZodError } from "zod";
 import { logError } from "./logger";
 
+export const CORS_ALLOWED_HEADERS = "Content-Type,Authorization";
+export const CORS_ALLOWED_METHODS = "OPTIONS,POST,GET,PUT,DELETE";
+
+/** The UI origin allowed to call the API (CORS_ORIGIN); any origin when unset. */
+export const corsOrigin = () => process.env.CORS_ORIGIN || "*";
+
+const responseHeaders = () => ({
+  "Content-Type": "application/json",
+  "Access-Control-Allow-Origin": corsOrigin(),
+  "Access-Control-Allow-Headers": CORS_ALLOWED_HEADERS,
+  "Access-Control-Allow-Methods": CORS_ALLOWED_METHODS,
+});
+
 export class ResponseManager {
   static OkResponse<T>(data: T, meta = {}, message = "ok") {
     return {
       statusCode: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE",
-      },
+      headers: responseHeaders(),
       body: JSON.stringify({
         data: data,
         message: message,
@@ -22,12 +30,7 @@ export class ResponseManager {
   static CreatedResponse<T>(data: T, meta = {}, message = "created") {
     return {
       statusCode: 201,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE",
-      },
+      headers: responseHeaders(),
       body: JSON.stringify({
         data: data,
         message: message,
@@ -39,24 +42,14 @@ export class ResponseManager {
   static NoContentResponse() {
     return {
       statusCode: 204,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE",
-      },
+      headers: responseHeaders(),
     };
   }
 
   static NotfoundResponse(message = "Not found") {
     return {
       statusCode: 404,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE",
-      },
+      headers: responseHeaders(),
       body: JSON.stringify({
         message: message,
       }),
@@ -66,12 +59,7 @@ export class ResponseManager {
   static AuthFailedResponse(message = "Auth failed") {
     return {
       statusCode: 401,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE",
-      },
+      headers: responseHeaders(),
       body: JSON.stringify({
         message: message,
       }),
@@ -81,12 +69,7 @@ export class ResponseManager {
   static BadRequestResponse(data: any, message = "Bad request") {
     return {
       statusCode: 400,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE",
-      },
+      headers: responseHeaders(),
       body: JSON.stringify({
         data,
         message: message,
@@ -113,12 +96,7 @@ export class ResponseManager {
     logError(functionName, error);
     return {
       statusCode: 500,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE",
-      },
+      headers: responseHeaders(),
       body: JSON.stringify({
         message: message,
       }),

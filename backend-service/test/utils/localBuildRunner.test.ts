@@ -108,6 +108,9 @@ describe("startLocalBuild", () => {
   });
 
   it("runs the buildspec steps, uploads the swagger and deploys to LocalStack", async () => {
+    // Left over from the old configuration; must never reach the build.
+    vi.stubEnv("AWS_KEY", "leaked-key");
+    vi.stubEnv("AWS_SECRET", "leaked-secret");
     const { build, done } = await startLocalBuild(dir, "p1", "x; rm -rf /");
     await done;
 
@@ -124,8 +127,9 @@ describe("startLocalBuild", () => {
     const [, , options] = proc.spawn.mock.calls[0];
     expect(options.cwd).toBe(dir);
     expect(options.env).toMatchObject({
-      AWS_ACCESS_KEY_ID: "test-key",
-      AWS_SECRET_ACCESS_KEY: "test-secret",
+      // LocalStack accepts any credentials.
+      AWS_ACCESS_KEY_ID: "test",
+      AWS_SECRET_ACCESS_KEY: "test",
       AWS_REGION: "eu-west-1",
       NODE_ENV: "test",
     });

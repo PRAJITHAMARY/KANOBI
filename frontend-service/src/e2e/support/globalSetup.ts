@@ -2,7 +2,7 @@ import { API_URL, BASE_URL } from "../../../playwright.config";
 import { compose, isUp, STARTED_FLAG } from "./stack";
 
 export default async function globalSetup() {
-  if ((await isUp(BASE_URL)) && (await isUp(`${API_URL}/project`))) {
+  if ((await isUp(BASE_URL)) && (await isUp(`${API_URL}/health`))) {
     console.log(`Reusing the running Kanobi stack at ${BASE_URL}`);
     return;
   }

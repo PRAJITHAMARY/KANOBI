@@ -21,7 +21,7 @@ The designs show several variants of the sidebar and header. Use one:
 - **Logo:** the blue "stacked layers" mark plus the word "Kanobi", everywhere, including the auth screens (the designs also use a terminal icon and a cube). No "BaaS" badge.
 - **Sidebar:**
   - nav items **Projects**, **Settings**, **Docs**
-  - user card at the bottom: name, email, and a menu with Sign out
+  - user card at the bottom: name, email, and a menu with Sign out (until the shell is built, a header bar shows the email and a Sign out button)
   - inside a project, a **project switcher** above the nav (the "PROJECT / Shop API" variant)
   - no workspace or org switcher (`acme-production`): workspaces don't exist
   - don't add a "WORKSPACE" section label; it wraps as "WORKSP / ACE" in two designs
@@ -113,13 +113,15 @@ Each section lists what to build and where to deviate from the design.
 
 ### Sign in (Figma: `Kanobi - Sign In (Light)`)
 
-- **No backend accounts yet** (`TODO.md` → Accounts). Until they exist, build the Sign in layout around the current login, and **hide**:
+- **Accounts exist** (Cognito), but only sign-in: users are created by an admin until sign-up is built (#28). **Hide**:
   - "Forgot password?"
   - "Continue with Google/GitHub"
   - "Sign up"
   - "All systems normal"
 - **Logo:** show it once, inside the card. Remove the duplicate in the page header.
 - **Error:** "Invalid email or password" as a form-level banner (1.5), not mono, and don't highlight only the password field.
+- **Expired session:** after a session can't be renewed the user lands on `/?expired=1`; show "Your session has expired. Sign in again." above the form.
+- **After signing in:** return to the page that sent the user to Sign in (`redirectTo`), or the dashboard.
 
 ### Sign up and Email verification
 

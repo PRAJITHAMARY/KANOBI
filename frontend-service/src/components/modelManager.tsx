@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { API_URL } from "../config";
+import { apiFetch } from "../api";
 import FormBanner from "./FormBanner";
 import {
   modelNameError,
@@ -85,8 +85,8 @@ export default function ModelManager({
       properties: [],
     };
 
-    const res = await fetch(
-      `${API_URL}/model/${project.id}`,
+    const res = await apiFetch(
+      `/model/${project.id}`,
       {
         method: "POST",
         body: JSON.stringify(newModel),
@@ -119,8 +119,8 @@ export default function ModelManager({
 
   // Delete model
   const deleteModel = async (id: string) => {
-    const res = await fetch(
-      `${API_URL}/model/${project.id}/${id}`,
+    const res = await apiFetch(
+      `/model/${project.id}/${id}`,
       {
         method: "DELETE",
       }
@@ -266,8 +266,8 @@ export default function ModelManager({
     /* v8 ignore if -- @preserve */
     if (!relation) return;
 
-    const res = await fetch(
-      `${API_URL}/model-relations/${project.id}/${modelId}`,
+    const res = await apiFetch(
+      `/model-relations/${project.id}/${modelId}`,
       {
         method: "PUT",
         body: JSON.stringify({
@@ -296,8 +296,8 @@ export default function ModelManager({
     // relToDelete is never populated today (see editRelationship / TODO.md).
     /* v8 ignore if -- @preserve */
     if (relToDelete.length > 0) {
-      await fetch(
-        `${API_URL}/model-relations/${project.id}/${modelId}`,
+      await apiFetch(
+        `/model-relations/${project.id}/${modelId}`,
         {
           method: "PUT",
           body: JSON.stringify({
@@ -312,8 +312,8 @@ export default function ModelManager({
       );
     }
 
-    const res = await fetch(
-      `${API_URL}/model/${project.id}/${modelId}`,
+    const res = await apiFetch(
+      `/model/${project.id}/${modelId}`,
       {
         method: "PUT",
         body: JSON.stringify({
@@ -324,8 +324,8 @@ export default function ModelManager({
       }
     );
 
-    const res1 = await fetch(
-      `${API_URL}/model-api/${project.id}/${modelId}`,
+    const res1 = await apiFetch(
+      `/model-api/${project.id}/${modelId}`,
       {
         method: "PUT",
         body: JSON.stringify({
@@ -334,8 +334,8 @@ export default function ModelManager({
       }
     );
 
-    await fetch(
-      `${API_URL}/model-relations/${project.id}/${modelId}`,
+    await apiFetch(
+      `/model-relations/${project.id}/${modelId}`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -372,8 +372,8 @@ export default function ModelManager({
   };
 
   const redeployChanges = async () => {
-    const res = await fetch(
-      `${API_URL}/deployment`,
+    const res = await apiFetch(
+      `/deployment`,
       {
         method: "PUT",
         body: JSON.stringify({

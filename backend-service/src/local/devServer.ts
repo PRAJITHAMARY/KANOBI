@@ -9,10 +9,17 @@ import { dirname, resolve } from "path";
 import yaml from "js-yaml";
 import { initDb } from "../utils/dynamodbClient";
 import { logError, logInfo, logWarning } from "../utils/logger";
+import {
+  CORS_ALLOWED_HEADERS,
+  CORS_ALLOWED_METHODS,
+  corsOrigin,
+} from "../utils/responseManager";
+import { createTokenVerifier, tokenFromHeader, VerifyToken } from "./tokenVerifier";
 
 // A minimal stand-in for API Gateway used by the Docker environment. It reads the
 // http events from serverless.yml and calls the compiled handlers in dist/, so the
 // API runs without the Serverless CLI (v4 needs a Serverless account login).
+// Routes with an `authorizer` require a valid Cognito ID token, like API Gateway.
 
 type Handler = (event: unknown, context: unknown) => Promise<HandlerResult>;
 
@@ -29,12 +36,19 @@ export interface Route {
   params: string[];
   pattern: RegExp;
   handler: Handler;
+  /** The route has an authorizer and needs a valid ID token. */
+  secured: boolean;
 }
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE",
+const corsHeaders = () => ({
+  "Access-Control-Allow-Origin": corsOrigin(),
+  "Access-Control-Allow-Headers": CORS_ALLOWED_HEADERS,
+  "Access-Control-Allow-Methods": CORS_ALLOWED_METHODS,
+});
+
+const UNAUTHORIZED = {
+  statusCode: 401,
+  body: JSON.stringify({ message: "Unauthorized" }),
 };
 
 export const loadRoutes = (configPath: string): Route[] => {
@@ -60,6 +74,7 @@ export const loadRoutes = (configPath: string): Route[] => {
         params: Array.from(path.matchAll(/\{(\w+)\}/g), (m) => m[1]),
         pattern: new RegExp("^" + path.replace(/\{\w+\}/g, "([^/]+)") + "/?$"),
         handler,
+        secured: Boolean(event.http.authorizer),
       });
     }
   }
@@ -78,7 +93,7 @@ const loadHandler = (root: string, handlerPath: string): Handler | undefined => 
   }
 };
 
-export const createServer = (routes: Route[]): Server =>
+export const createServer = (routes: Route[], verifyToken?: VerifyToken): Server =>
   createHttpServer(async (req, res) => {
     if (req.method === "OPTIONS") {
       return send(res, { statusCode: 204 });
@@ -103,8 +118,20 @@ export const createServer = (routes: Route[]): Server =>
       });
     }
 
+    let requestContext = {};
+    if (route.secured) {
+      const token = tokenFromHeader(req.headers.authorization);
+      if (!token || !verifyToken) return send(res, UNAUTHORIZED);
+      try {
+        requestContext = { authorizer: { claims: await verifyToken(token) } };
+      } catch {
+        return send(res, UNAUTHORIZED);
+      }
+    }
+
     const body = await readBody(req);
     const event = {
+      requestContext,
       httpMethod: req.method,
       path: url.pathname,
       resource: route.path,
@@ -140,7 +167,7 @@ const readBody = (req: IncomingMessage) =>
   });
 
 const send = (res: ServerResponse, result: HandlerResult) => {
-  res.writeHead(result.statusCode ?? 200, { ...CORS_HEADERS, ...result.headers });
+  res.writeHead(result.statusCode ?? 200, { ...corsHeaders(), ...result.headers });
   res.end(result.body ?? "");
 };
 
@@ -148,16 +175,24 @@ export const resolvePort = () => Number(process.env.PORT ?? 3000);
 
 export const start = async (
   configPath = resolve(__dirname, "..", "..", "serverless.yml"),
-  port = resolvePort()
+  port = resolvePort(),
+  verifyToken?: VerifyToken
 ) => {
   await initDb(process.env.SERVICE_TABLE ?? "");
 
   const routes = loadRoutes(configPath);
   for (const route of routes) {
-    logInfo(start.name, `${route.method} ${route.path} -> ${route.name}`);
+    logInfo(
+      start.name,
+      `${route.method} ${route.path} -> ${route.name}${route.secured ? " (auth)" : ""}`
+    );
   }
 
-  const server = createServer(routes);
+  if (!verifyToken && routes.some((r) => r.secured)) {
+    verifyToken = createTokenVerifier();
+  }
+
+  const server = createServer(routes, verifyToken);
   await new Promise<void>((done) => server.listen(port, done));
   logInfo(start.name, `Kanobi API listening on port ${port}`);
 

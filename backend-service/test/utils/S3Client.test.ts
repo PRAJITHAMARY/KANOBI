@@ -268,5 +268,23 @@ describe("client configuration", () => {
     await mod.uploadFile("k", "b");
     const client = s3.commandCalls(PutObjectCommand)[0].thisValue as S3Client;
     expect(await client.config.endpoint?.()).toMatchObject({ hostname: "localhost" });
+    expect(await client.config.credentials()).toMatchObject({
+      accessKeyId: "test",
+      secretAccessKey: "test",
+    });
+  });
+
+  it("uses the default credential chain (the Lambda role) outside dev", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("AWS_KEY", "static-key");
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "role-key");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "role-secret");
+    vi.resetModules();
+    const mod = await import("../../src/utils/S3Client");
+    s3.on(PutObjectCommand).resolves({});
+    await mod.uploadFile("k", "b");
+    const client = s3.commandCalls(PutObjectCommand)[0].thisValue as S3Client;
+    expect(client.config.endpoint).toBeUndefined();
+    expect(await client.config.credentials()).toMatchObject({ accessKeyId: "role-key" });
   });
 });

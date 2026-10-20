@@ -13,7 +13,7 @@ import { docClient } from "../../utils/dynamodbClient";
 import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { getPutOperators } from "../../utils/dynamodbHelpers";
 import { Keys } from "../../utils/keys";
-import { CodeBuild } from "aws-sdk";
+import { CodeBuildClient, StartBuildCommand } from "@aws-sdk/client-codebuild";
 import { isLocalStack } from "../../utils/awsConfig";
 import { startLocalBuild } from "../../utils/localBuildRunner";
 
@@ -91,22 +91,23 @@ async function TriggerBuild(
   projectFolder: string,
   projectName: string
 ) {
+  const codeBuildProject = process.env.CODEBUILD_PROJECT;
+  if (!codeBuildProject) {
+    throw new Error("CODEBUILD_PROJECT is not set");
+  }
+
+  // The build runs as the CodeBuild project's service role (serverless.yml),
+  // so no credentials are passed to it.
   const buildParams = {
-    projectName: "sls-code-deploy",
-    sourceTypeOverride: "S3",
+    projectName: codeBuildProject,
+    sourceTypeOverride: "S3" as const,
     sourceLocationOverride: `${process.env.BUCKET_NAME}/${zipKey}`,
     // The project name is user input: pass it as data, never as buildspec text.
     environmentVariablesOverride: [
-      { name: "PROJECT_NAME", value: projectName, type: "PLAINTEXT" },
+      { name: "PROJECT_NAME", value: projectName, type: "PLAINTEXT" as const },
     ],
     buildspecOverride: `
 version: 0.2
-
-env:
-  variables:
-    AWS_ACCESS_KEY_ID: ${process.env.AWS_KEY}
-    AWS_SECRET_ACCESS_KEY: ${process.env.AWS_SECRET}
-    AWS_REGION: ${process.env.AWS_DEPLOY_REGION}
 
 phases:
   install:
@@ -125,16 +126,8 @@ phases:
     `,
   };
 
-  const codebuild = new CodeBuild({
-    region: process.env.AWS_DEPLOY_REGION,
-    credentials: {
-      accessKeyId: `${process.env.AWS_KEY}`,
-      secretAccessKey: `${process.env.AWS_SECRET}`,
-    },
-  });
-
-  const result = await codebuild.startBuild(buildParams).promise();
-  return result;
+  const codebuild = new CodeBuildClient({ region: process.env.AWS_DEPLOY_REGION });
+  return codebuild.send(new StartBuildCommand(buildParams));
 }
 
 async function zipFolder(sourceDir: string, outPath: string) {

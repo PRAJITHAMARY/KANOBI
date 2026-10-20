@@ -185,7 +185,7 @@ describe("adding and deleting models", () => {
 
     await waitFor(() => expect(screen.getAllByPlaceholderText("Model Name")).toHaveLength(2));
     expect(screen.queryByText("No relationship defined")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(`${API}/model/p1/m2`, { method: "DELETE" });
+    expect(fetchMock).toHaveBeenCalledWith(`${API}/model/p1/m2`, { method: "DELETE", headers: {} });
     expect(screen.getByDisplayValue("User")).toBeInTheDocument();
   });
 

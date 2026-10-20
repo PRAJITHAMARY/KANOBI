@@ -3,12 +3,12 @@ import { mockClient } from "aws-sdk-client-mock";
 import {
   BatchWriteCommand,
   DynamoDBDocumentClient,
+  GetCommand,
   PutCommand,
   QueryCommand,
-  ScanCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { apiEvent, context, parseBody, PROJECT_ID } from "../helpers";
+import { apiEvent, context, parseBody, PROJECT_ID, USER_ID } from "../helpers";
 
 const { publish, currentCost, monthlyCost } = vi.hoisted(() => ({
   publish: vi.fn(),
@@ -27,6 +27,7 @@ vi.mock("../../src/utils/infraHelper", async (importOriginal) => ({
 }));
 
 import {
+  COST_CACHE_MS,
   CreateProject,
   DeleteProject,
   GetOneProject,
@@ -36,6 +37,19 @@ import {
 } from "../../src/api/project/project";
 
 const ddb = mockClient(DynamoDBDocumentClient);
+
+/** The project row requireProjectOwner loads; owned by USER_ID unless overridden. */
+const projectRow = (id: string, extra: Record<string, unknown> = {}) => ({
+  pk: `pr_${id}`,
+  sk: `pr_${id}`,
+  entityType: "Project",
+  name: "shop",
+  ownerId: USER_ID,
+  ...extra,
+});
+
+const givenOwnedProject = (id: string, extra: Record<string, unknown> = {}) =>
+  ddb.on(GetCommand).resolves({ Item: projectRow(id, extra) });
 
 beforeEach(() => {
   ddb.reset();
@@ -52,10 +66,13 @@ describe.each([
   beforeEach(() => {
     vi.stubEnv("SERVICE_TABLE", tableEnv);
   });
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
+  });
 
   describe("CreateProject", () => {
-    it("saves the project and publishes PROJECT_CREATED", async () => {
+    it("saves the project with its owner and publishes PROJECT_CREATED", async () => {
       ddb.on(PutCommand).resolves({});
 
       const res = await CreateProject(
@@ -71,6 +88,7 @@ describe.each([
           pk: "pr_new-id",
           sk: "pr_new-id",
           entityType: "Project",
+          ownerId: USER_ID,
           name: "shop",
           description: "d",
         },
@@ -101,6 +119,15 @@ describe.each([
       }
     );
 
+    it("returns 401 without a signed-in user", async () => {
+      const res = await CreateProject(
+        apiEvent({ body: { name: "shop" }, userId: null }),
+        context
+      );
+      expect(res.statusCode).toBe(401);
+      expect(ddb.calls()).toHaveLength(0);
+    });
+
     it("returns 500 on unexpected errors", async () => {
       ddb.on(PutCommand).rejects(new Error("db down"));
       const res = await CreateProject(apiEvent({ body: { name: "shop" } }), context);
@@ -109,11 +136,11 @@ describe.each([
   });
 
   describe("GetProjects", () => {
-    it("pages projects using take and nextPageToken", async () => {
-      ddb.on(ScanCommand).resolves({
-        Items: [{ pk: "pr_1", sk: "pr_1", name: "A", entityType: "Project" }],
+    it("lists only the user's projects, paging with take and nextPageToken", async () => {
+      ddb.on(QueryCommand).resolves({
+        Items: [projectRow("1", { name: "a" })],
         Count: 1,
-        LastEvaluatedKey: { pk: "pr_1", sk: "pr_1" },
+        LastEvaluatedKey: { ownerId: USER_ID, pk: "pr_1", sk: "pr_1" },
       });
 
       const res = await GetProjects(
@@ -123,21 +150,22 @@ describe.each([
 
       expect(res.statusCode).toBe(200);
       expect(parseBody(res)).toEqual({
-        data: [{ id: "1", name: "A", entityType: "Project" }],
+        data: [{ id: "1", name: "a", entityType: "Project" }],
         message: "ok",
         meta: { count: 1, hasMore: true, nextPageToken: "1" },
       });
-      expect(ddb.commandCalls(ScanCommand)[0].args[0].input).toEqual({
+      expect(ddb.commandCalls(QueryCommand)[0].args[0].input).toEqual({
         TableName: table,
+        IndexName: "byOwner",
+        KeyConditionExpression: "ownerId = :ownerId",
+        ExpressionAttributeValues: { ":ownerId": USER_ID },
         Limit: 5,
-        FilterExpression: "entityType = :type",
-        ExpressionAttributeValues: { ":type": "Project" },
-        ExclusiveStartKey: { pk: "pr_0", sk: "pr_0" },
+        ExclusiveStartKey: { ownerId: USER_ID, pk: "pr_0", sk: "pr_0" },
       });
     });
 
-    it("defaults paging and handles an empty table", async () => {
-      ddb.on(ScanCommand).resolves({ Count: 0 });
+    it("defaults paging and handles no results", async () => {
+      ddb.on(QueryCommand).resolves({ Count: 0 });
 
       const res = await GetProjects(apiEvent(), context);
 
@@ -146,47 +174,93 @@ describe.each([
         message: "ok",
         meta: { count: 0, hasMore: false },
       });
-      const input = ddb.commandCalls(ScanCommand)[0].args[0].input;
+      const input = ddb.commandCalls(QueryCommand)[0].args[0].input;
       expect(input.Limit).toBe(20);
       expect(input.ExclusiveStartKey).toBeUndefined();
     });
 
-    it("treats an empty item list as no results", async () => {
-      ddb.on(ScanCommand).resolves({ Items: [] });
-      expect(parseBody(await GetProjects(apiEvent(), context)).data).toEqual([]);
+    it("leaves cached cost out of the response", async () => {
+      ddb.on(QueryCommand).resolves({
+        Items: [projectRow("1", { cost: { fetchedAt: "x" } })],
+      });
+      expect(parseBody(await GetProjects(apiEvent(), context)).data).toEqual([
+        { id: "1", name: "shop", entityType: "Project" },
+      ]);
+    });
+
+    it("returns 401 without a signed-in user", async () => {
+      expect((await GetProjects(apiEvent({ userId: null }), context)).statusCode).toBe(401);
+      expect(ddb.calls()).toHaveLength(0);
     });
 
     it("returns 500 on errors", async () => {
-      ddb.on(ScanCommand).rejects(new Error("x"));
+      ddb.on(QueryCommand).rejects(new Error("x"));
       expect((await GetProjects(apiEvent(), context)).statusCode).toBe(500);
     });
   });
 
   describe("GetProjectCost", () => {
     const event = apiEvent({ pathParameters: { id: PROJECT_ID } });
+    const NOW = new Date("2026-10-19T12:00:00.000Z");
+    const freshCost = {
+      currentCost: { amount: "1.00", currency: "USD" },
+      projectedCost: { amount: "3.00", currency: "USD" },
+    };
 
-    it("returns current and projected cost", async () => {
-      ddb.on(QueryCommand).resolves({
-        Items: [{ pk: `pr_${PROJECT_ID}`, sk: `pr_${PROJECT_ID}`, entityType: "Project" }],
-      });
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+    });
+
+    it("fetches current and projected cost and caches it on the project", async () => {
+      givenOwnedProject(PROJECT_ID);
+      ddb.on(UpdateCommand).resolves({});
       currentCost.mockResolvedValue({ amount: "1.00", currency: "USD" });
       monthlyCost.mockResolvedValue({ amount: "3.00", currency: "USD" });
 
       const res = await GetProjectCost(event, context);
 
-      expect(parseBody(res).data).toEqual({
-        currentCost: { amount: "1.00", currency: "USD" },
-        projectedCost: { amount: "3.00", currency: "USD" },
-      });
+      expect(parseBody(res).data).toEqual(freshCost);
       expect(currentCost).toHaveBeenCalledWith("Project", PROJECT_ID);
       expect(monthlyCost).toHaveBeenCalledWith("Service", "service-555555");
-      expect(ddb.commandCalls(QueryCommand)[0].args[0].input.TableName).toBe(tableEnv);
+      expect(ddb.commandCalls(UpdateCommand)[0].args[0].input).toEqual({
+        TableName: table,
+        Key: { pk: `pr_${PROJECT_ID}`, sk: `pr_${PROJECT_ID}` },
+        UpdateExpression: "set #cost = :cost",
+        ExpressionAttributeNames: { "#cost": "cost" },
+        ExpressionAttributeValues: {
+          ":cost": { ...freshCost, fetchedAt: NOW.toISOString() },
+        },
+      });
+    });
+
+    it("serves a cached cost younger than an hour without calling Cost Explorer", async () => {
+      const fetchedAt = new Date(NOW.getTime() - COST_CACHE_MS + 1000).toISOString();
+      givenOwnedProject(PROJECT_ID, { cost: { ...freshCost, fetchedAt } });
+
+      const res = await GetProjectCost(event, context);
+
+      expect(parseBody(res).data).toEqual(freshCost);
+      expect(currentCost).not.toHaveBeenCalled();
+      expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+    });
+
+    it("refreshes a cached cost an hour old", async () => {
+      const fetchedAt = new Date(NOW.getTime() - COST_CACHE_MS).toISOString();
+      givenOwnedProject(PROJECT_ID, { cost: { ...freshCost, fetchedAt } });
+      ddb.on(UpdateCommand).resolves({});
+      currentCost.mockResolvedValue({ amount: "2.00", currency: "USD" });
+      monthlyCost.mockResolvedValue({ amount: "4.00", currency: "USD" });
+
+      const res = await GetProjectCost(event, context);
+
+      expect(parseBody(res).data.currentCost.amount).toBe("2.00");
+      expect(currentCost).toHaveBeenCalled();
     });
 
     it("tolerates missing cost results", async () => {
-      ddb.on(QueryCommand).resolves({
-        Items: [{ pk: "pr_1", sk: "pr_1", entityType: "Project" }],
-      });
+      givenOwnedProject(PROJECT_ID);
+      ddb.on(UpdateCommand).resolves({});
       currentCost.mockResolvedValue(undefined);
       monthlyCost.mockResolvedValue(undefined);
 
@@ -196,25 +270,35 @@ describe.each([
       });
     });
 
-    it.each([[{}], [{ Items: [] }], [{ Items: [{ entityType: "Model" }] }]])(
-      "returns 404 when the project is missing %#",
-      async (result) => {
-        ddb.on(QueryCommand).resolves(result);
-        expect((await GetProjectCost(event, context)).statusCode).toBe(404);
-      }
-    );
+    it.each([
+      ["missing", undefined],
+      ["owned by someone else", projectRow(PROJECT_ID, { ownerId: "other" })],
+    ])("returns 404 when the project is %s", async (_case, Item) => {
+      ddb.on(GetCommand).resolves({ Item });
+      expect((await GetProjectCost(event, context)).statusCode).toBe(404);
+      expect(currentCost).not.toHaveBeenCalled();
+    });
+
+    it("returns 401 without a signed-in user", async () => {
+      const res = await GetProjectCost(
+        apiEvent({ pathParameters: { id: PROJECT_ID }, userId: null }),
+        context
+      );
+      expect(res.statusCode).toBe(401);
+    });
 
     it("returns 500 on errors", async () => {
-      ddb.on(QueryCommand).rejects(new Error("x"));
+      ddb.on(GetCommand).rejects(new Error("x"));
       expect((await GetProjectCost(apiEvent(), context)).statusCode).toBe(500);
     });
   });
 
   describe("GetOneProject", () => {
     it("returns the project with its models", async () => {
+      givenOwnedProject("1");
       ddb.on(QueryCommand).resolves({
         Items: [
-          { pk: "pr_1", sk: "pr_1", entityType: "Project", name: "Shop" },
+          projectRow("1", { cost: { fetchedAt: "x" } }),
           { pk: "pr_1", sk: "ml_2", entityType: "Model", name: "User" },
           { pk: "pr_1", sk: "dp_3", entityType: "Deployment" },
         ],
@@ -228,27 +312,44 @@ describe.each([
       expect(parseBody(res).data).toEqual({
         id: "1",
         entityType: "Project",
-        name: "Shop",
+        name: "shop",
         models: [{ id: "2", entityType: "Model", name: "User" }],
       });
+      expect(ddb.commandCalls(QueryCommand)[0].args[0].input.TableName).toBe(tableEnv);
+    });
+
+    it("returns 404 for another user's project without reading it", async () => {
+      ddb.on(GetCommand).resolves({ Item: projectRow("1", { ownerId: "other" }) });
+      const res = await GetOneProject(apiEvent({ pathParameters: { id: "1" } }), context);
+      expect(res.statusCode).toBe(404);
+      expect(ddb.commandCalls(QueryCommand)).toHaveLength(0);
     });
 
     it.each([[{}], [{ Items: [] }], [{ Items: [{ entityType: "Model" }] }]])(
-      "returns 404 when the project is missing %#",
+      "returns 404 when the project rows are missing %#",
       async (result) => {
+        givenOwnedProject("1");
         ddb.on(QueryCommand).resolves(result);
-        expect((await GetOneProject(apiEvent(), context)).statusCode).toBe(404);
+        expect(
+          (await GetOneProject(apiEvent({ pathParameters: { id: "1" } }), context)).statusCode
+        ).toBe(404);
       }
     );
 
+    it("returns 401 without a signed-in user", async () => {
+      expect((await GetOneProject(apiEvent({ userId: null }), context)).statusCode).toBe(401);
+    });
+
     it("returns 500 on errors", async () => {
+      givenOwnedProject("1");
       ddb.on(QueryCommand).rejects(new Error("x"));
       expect((await GetOneProject(apiEvent(), context)).statusCode).toBe(500);
     });
   });
 
   describe("PutProject", () => {
-    it("updates name and description", async () => {
+    it("updates name and description of an owned project", async () => {
+      givenOwnedProject("1");
       ddb.on(UpdateCommand).resolves({});
 
       const res = await PutProject(
@@ -266,6 +367,19 @@ describe.each([
       });
     });
 
+    it.each([
+      ["an unknown project", undefined],
+      ["another user's project", projectRow("1", { ownerId: "other" })],
+    ])("returns 404 and writes nothing for %s", async (_case, Item) => {
+      ddb.on(GetCommand).resolves({ Item });
+      const res = await PutProject(
+        apiEvent({ pathParameters: { id: "1" }, body: { name: "new-name" } }),
+        context
+      );
+      expect(res.statusCode).toBe(404);
+      expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+    });
+
     it("rejects an invalid body", async () => {
       const res = await PutProject(apiEvent({ body: { name: "x" } }), context);
       expect(res.statusCode).toBe(400);
@@ -281,7 +395,17 @@ describe.each([
       expect((await PutProject(apiEvent(), context)).statusCode).toBe(400);
     });
 
+    it("returns 401 without a signed-in user", async () => {
+      const res = await PutProject(
+        apiEvent({ pathParameters: { id: "1" }, body: { name: "valid" }, userId: null }),
+        context
+      );
+      expect(res.statusCode).toBe(401);
+      expect(ddb.calls()).toHaveLength(0);
+    });
+
     it("returns 500 on errors", async () => {
+      givenOwnedProject("1");
       ddb.on(UpdateCommand).rejects(new Error("x"));
       const res = await PutProject(apiEvent({ body: { name: "valid" } }), context);
       expect(res.statusCode).toBe(500);
@@ -289,14 +413,11 @@ describe.each([
   });
 
   describe("DeleteProject", () => {
-    const projectItem = {
-      pk: "pr_1",
-      sk: "pr_1",
-      entityType: "Project",
-      stackName: "service-1-formation",
-    };
+    const projectItem = projectRow("1", { stackName: "service-1-formation" });
+    const deleteEvent = apiEvent({ pathParameters: { id: "1" } });
 
     it("batch-deletes all project items in chunks of 25 and publishes", async () => {
+      givenOwnedProject("1");
       const models = Array.from({ length: 26 }, (_, i) => ({
         pk: "pr_1",
         sk: `ml_${i}`,
@@ -308,7 +429,7 @@ describe.each([
         .resolvesOnce({ UnprocessedItems: { [table]: [] } })
         .resolvesOnce({ UnprocessedItems: {} });
 
-      const res = await DeleteProject({ pathParameters: { id: "1" } });
+      const res = await DeleteProject(deleteEvent);
 
       expect(res.statusCode).toBe(204);
       const batches = ddb.commandCalls(BatchWriteCommand);
@@ -327,20 +448,38 @@ describe.each([
     });
 
     it("does not warn when the batch response omits UnprocessedItems", async () => {
+      givenOwnedProject("1");
       ddb.on(QueryCommand).resolves({ Items: [projectItem] });
       ddb.on(BatchWriteCommand).resolves({});
-      expect((await DeleteProject({ pathParameters: { id: "1" } })).statusCode).toBe(204);
+      expect((await DeleteProject(deleteEvent)).statusCode).toBe(204);
       expect(console.warn).not.toHaveBeenCalled();
     });
 
-    it.each([[{}], [{ Items: [] }]])("returns 404 when the project is missing %#", async (result) => {
-      ddb.on(QueryCommand).resolves(result);
-      expect((await DeleteProject({})).statusCode).toBe(404);
+    it("returns 404 and deletes nothing for another user's project", async () => {
+      ddb.on(GetCommand).resolves({ Item: projectRow("1", { ownerId: "other" }) });
+      expect((await DeleteProject(deleteEvent)).statusCode).toBe(404);
+      expect(ddb.commandCalls(BatchWriteCommand)).toHaveLength(0);
+      expect(publish).not.toHaveBeenCalled();
+    });
+
+    it.each([[{}], [{ Items: [] }]])(
+      "returns 404 when the project rows are missing %#",
+      async (result) => {
+        givenOwnedProject("1");
+        ddb.on(QueryCommand).resolves(result);
+        expect((await DeleteProject(deleteEvent)).statusCode).toBe(404);
+      }
+    );
+
+    it("returns 401 without a signed-in user", async () => {
+      expect((await DeleteProject(apiEvent({ userId: null }))).statusCode).toBe(401);
+      expect(ddb.calls()).toHaveLength(0);
     });
 
     it("returns 500 on errors", async () => {
+      givenOwnedProject("1");
       ddb.on(QueryCommand).rejects(new Error("x"));
-      expect((await DeleteProject({})).statusCode).toBe(500);
+      expect((await DeleteProject(deleteEvent)).statusCode).toBe(500);
     });
   });
 });

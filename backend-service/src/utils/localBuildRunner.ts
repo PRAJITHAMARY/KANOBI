@@ -11,6 +11,7 @@ import {
   uploadFile,
 } from "./S3Client";
 import { logInfo } from "./logger";
+import { LOCAL_CREDENTIALS } from "./awsConfig";
 
 // Stands in for CodeBuild when DEPLOY_TARGET=localstack: runs the same steps as
 // the buildspec in deploymentEvent.ts inside the backend container and deploys
@@ -168,8 +169,8 @@ function runCommand(
       cwd,
       env: {
         ...process.env,
-        AWS_ACCESS_KEY_ID: process.env.AWS_KEY,
-        AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET,
+        AWS_ACCESS_KEY_ID: LOCAL_CREDENTIALS.accessKeyId,
+        AWS_SECRET_ACCESS_KEY: LOCAL_CREDENTIALS.secretAccessKey,
         AWS_REGION: process.env.AWS_DEPLOY_REGION,
         ...env,
       },

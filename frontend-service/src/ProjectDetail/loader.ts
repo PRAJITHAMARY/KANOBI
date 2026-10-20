@@ -1,11 +1,11 @@
 import { redirect } from "react-router";
-import { API_URL } from "../config";
+import { apiFetch } from "../api";
 
 export const projectDetailLoader = async ({ params }: { params: any }) => {
   try {
     const { id } = params;
-    const projectResponse = await fetch(
-      `${API_URL}/project/${id}`
+    const projectResponse = await apiFetch(
+      `/project/${id}`
     );
 
     const project = (await projectResponse.json()).data;
@@ -14,13 +14,13 @@ export const projectDetailLoader = async ({ params }: { params: any }) => {
       return redirect("/project");
     }
 
-    // const projectCost = await fetch(
-    //   `${API_URL}/project/cost/${id}`
+    // const projectCost = await apiFetch(
+    //   `/project/cost/${id}`
     // );
     // const bill = (await projectCost.json()).data;
 
-    const deploymentResponse = await fetch(
-      `${API_URL}/deployment/${id}`
+    const deploymentResponse = await apiFetch(
+      `/deployment/${id}`
     );
     const deployment = (await deploymentResponse.json()).data;
 
