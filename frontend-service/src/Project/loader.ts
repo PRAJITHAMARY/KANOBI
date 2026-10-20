@@ -1,9 +1,9 @@
-import { API_URL } from "../config";
+import { apiFetch } from "../api";
 
 export const projectsLoader = async () => {
   try {
-    const response = await fetch(
-      `${API_URL}/project`
+    const response = await apiFetch(
+      `/project`
     );
 
     const projects = await response.json();

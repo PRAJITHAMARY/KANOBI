@@ -6,14 +6,22 @@ import type { APIGatewayProxyEvent, Context } from "aws-lambda";
 
 export const context = {} as Context;
 
+export const USER_ID = "user-1";
+
 export const apiEvent = (
   overrides: {
     body?: unknown;
     pathParameters?: Record<string, string | undefined> | null;
     queryStringParameters?: Record<string, string | undefined> | null;
+    /** The signed-in user's `sub`; null for a request without claims. */
+    userId?: string | null;
   } = {}
 ) =>
   ({
+    requestContext:
+      overrides.userId === null
+        ? {}
+        : { authorizer: { claims: { sub: overrides.userId ?? USER_ID } } },
     body:
       overrides.body === undefined
         ? null

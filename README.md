@@ -7,7 +7,7 @@ Kanobi is a backend-as-a-service generator. You describe your data and Kanobi wr
 3. Click **Deploy**. Kanobi generates a TypeScript [Serverless Framework](https://www.serverless.com/) service for the project and deploys it to AWS: Lambda, API Gateway, and one DynamoDB table per model. The UI then shows the build log and live Swagger docs for the new API.
 
 > [!WARNING]
-> Kanobi is not production-ready. The API has **no authentication**, the login screen is a hard-coded client-side check (`admin` / `password`), and several injection risks are known. Read [TODO.md](TODO.md) before exposing it anywhere.
+> Kanobi is not production-ready. Read [TODO.md](TODO.md) for the known security gaps before exposing it anywhere.
 
 ## How it works
 
@@ -63,9 +63,12 @@ docker compose up --build
 
 | Service | URL |
 |---|---|
-| UI | http://localhost:5173 (log in with `admin` / `password`) |
-| API | http://localhost:3000 |
+| UI | http://localhost:5173 (sign in as `demo@kanobi.local` / `Kanobi-demo-1`) |
+| API | http://localhost:3000 (`GET /health` is the only public route) |
 | LocalStack | http://localhost:4566 |
+| cognito-local | http://localhost:9229 (local stand-in for the Cognito user pool) |
+
+Sign-in uses [cognito-local](https://github.com/jagregory/cognito-local), seeded from [`cognito-local/`](cognito-local) with two users: `demo@kanobi.local` / `Kanobi-demo-1` and `other@kanobi.local` / `Kanobi-other-1`. Each user sees only their own projects.
 
 On every start, LocalStack runs [`seed.sh`](localstack/init/seed.sh). It creates the `KanobiTable` table and the `kanobi-local` bucket and uploads the boilerplate. The backend and frontend reload when you edit `src/`.
 
@@ -84,7 +87,7 @@ curl "$BASE_URL/Product"
 - Infrastructure calls go to LocalStack.
 - Project cost always reports 0, because LocalStack has no Cost Explorer.
 
-**LocalStack image.** Images from 2026.03 onwards need a (free) `LOCALSTACK_AUTH_TOKEN`. The compose file pins `localstack/localstack:4.14`, which runs without one. To use a newer image, copy [.env.example](.env.example) to `.env` and set `LOCALSTACK_IMAGE` and `LOCALSTACK_AUTH_TOKEN`.
+**LocalStack image.** Images from 2026.03 onwards need a (free) `LOCALSTACK_AUTH_TOKEN`. The compose file pins `localstack/localstack:4.14`, which runs without one. To use a newer image, copy [.env.docker.example](.env.docker.example) to `.env` and set `LOCALSTACK_IMAGE` and `LOCALSTACK_AUTH_TOKEN`.
 
 Stop everything with `docker compose down -v`.
 
@@ -180,7 +183,14 @@ npx sls deploy -s <stage>
 
 `sls deploy` also creates the CodeBuild project that deploys generated services (`kanobi-deploy-<stage>`), its service role, and the role CloudFormation uses to create and delete generated services' resources. Every role is scoped to the resources Kanobi uses. Older setups had a hand-made `sls-code-deploy` CodeBuild project; it is no longer used and can be deleted.
 
-**Frontend.** `npm run build` produces a static site in `frontend-service/dist/`, pointed at the URL in `.env.production`.
+**Sign-in.** `sls deploy` also creates the Cognito user pool and app client. Set `UI_ORIGIN` (the UI's origin, used for CORS) in `.env` before deploying. Users are created by an admin until sign-up exists; give them a permanent password, because the UI can't complete Cognito's "new password required" step:
+```bash
+aws cognito-idp admin-create-user --user-pool-id <UserPoolId> --username you@example.com --message-action SUPPRESS
+aws cognito-idp admin-set-user-password --user-pool-id <UserPoolId> --username you@example.com --password '<password>' --permanent
+```
+Projects created before sign-in existed have no owner and are hidden. Give them to a user (their Cognito `sub`) with `node dist/scripts/assignOwnerCli.js <sub>` from `backend-service`, with `SERVICE_TABLE` and AWS credentials for the stage.
+
+**Frontend.** `npm run build` produces a static site in `frontend-service/dist/`, pointed at the API and Cognito settings in `.env.production` (`VITE_COGNITO_CLIENT_ID` is the `UserPoolClientId` stack output).
 
 ## Contributing
 

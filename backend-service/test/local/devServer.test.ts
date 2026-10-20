@@ -6,7 +6,12 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 const db = vi.hoisted(() => ({ initDb: vi.fn() }));
+const tokens = vi.hoisted(() => ({ createTokenVerifier: vi.fn() }));
 vi.mock("../../src/utils/dynamodbClient", () => db);
+vi.mock("../../src/local/tokenVerifier", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  createTokenVerifier: tokens.createTokenVerifier,
+}));
 vi.mock("fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fs")>();
   return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
@@ -42,6 +47,14 @@ functions:
       - http:
           method: DELETE
           path: /bare
+  Secured:
+    handler: handlers.echo
+    events:
+      - http:
+          method: get
+          path: /secured
+          authorizer:
+            type: COGNITO_USER_POOLS
   Boom:
     handler: handlers.boom
     events:
@@ -77,8 +90,8 @@ const writeConfig = (config: string) => {
   return path;
 };
 
-const listen = async () => {
-  server = await start(writeConfig(CONFIG), 0);
+const listen = async (verifyToken?: (token: string) => Promise<any>) => {
+  server = await start(writeConfig(CONFIG), 0, verifyToken);
   return `http://localhost:${(server.address() as AddressInfo).port}`;
 };
 
@@ -86,6 +99,7 @@ beforeEach(() => {
   dir = fs.mkdtempSync(join(tmpdir(), "kanobi-dev-server-"));
   fs.writeFileSync(join(dir, "handlers.js"), HANDLERS);
   db.initDb.mockReset().mockResolvedValue(undefined);
+  tokens.createTokenVerifier.mockReset().mockReturnValue(undefined);
 });
 
 afterEach(async () => {
@@ -99,11 +113,12 @@ describe("loadRoutes", () => {
   it("registers http events and skips other and unloadable functions", () => {
     const routes = loadRoutes(writeConfig(CONFIG));
 
-    expect(routes.map((r) => [r.name, r.method, r.path, r.params])).toEqual([
-      ["Echo", "GET", "/item/{projectId}/{modelId}", ["projectId", "modelId"]],
-      ["Echo", "POST", "/item", []],
-      ["Bare", "DELETE", "/bare", []],
-      ["Boom", "GET", "/boom", []],
+    expect(routes.map((r) => [r.name, r.method, r.path, r.params, r.secured])).toEqual([
+      ["Echo", "GET", "/item/{projectId}/{modelId}", ["projectId", "modelId"], false],
+      ["Echo", "POST", "/item", [], false],
+      ["Bare", "DELETE", "/bare", [], false],
+      ["Secured", "GET", "/secured", [], true],
+      ["Boom", "GET", "/boom", [], false],
     ]);
     expect(console.warn).toHaveBeenCalledWith(
       expect.anything(),
@@ -156,6 +171,7 @@ describe("dev server", () => {
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
     const event = await res.json();
     expect(event).toMatchObject({
+      requestContext: {},
       httpMethod: "GET",
       path: "/item/p%201/m1/",
       resource: "/item/{projectId}/{modelId}",
@@ -196,6 +212,14 @@ describe("dev server", () => {
     expect(res.headers.get("access-control-allow-methods")).toBe(
       "OPTIONS,POST,GET,PUT,DELETE"
     );
+    expect(res.headers.get("access-control-allow-headers")).toBe("Content-Type,Authorization");
+  });
+
+  it("allows only CORS_ORIGIN when it is set", async () => {
+    vi.stubEnv("CORS_ORIGIN", "http://localhost:5173");
+    const base = await listen();
+    const res = await fetch(`${base}/item`, { method: "OPTIONS" });
+    expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
   });
 
   it.each([
@@ -206,6 +230,67 @@ describe("dev server", () => {
     const res = await fetch(base + path, { method });
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ message: `No route for ${method} ${path}` });
+  });
+
+  describe("secured routes", () => {
+    it("passes the verified claims to the handler", async () => {
+      const verify = vi.fn().mockResolvedValue({ sub: "u1", token_use: "id" });
+      const base = await listen(verify);
+
+      const res = await fetch(`${base}/secured`, { headers: { Authorization: "Bearer t0k" } });
+
+      expect(res.status).toBe(201);
+      expect((await res.json()).requestContext).toEqual({
+        authorizer: { claims: { sub: "u1", token_use: "id" } },
+      });
+      expect(verify).toHaveBeenCalledWith("t0k");
+    });
+
+    it.each([
+      ["no Authorization header", {}],
+      ["an empty token", { Authorization: "Bearer " }],
+    ])("returns 401 for %s", async (_case, headers) => {
+      const verify = vi.fn();
+      const base = await listen(verify);
+      const res = await fetch(`${base}/secured`, { headers });
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ message: "Unauthorized" });
+      expect(res.headers.get("access-control-allow-origin")).toBe("*");
+      expect(verify).not.toHaveBeenCalled();
+    });
+
+    it("returns 401 when the token does not verify", async () => {
+      const base = await listen(vi.fn().mockRejectedValue(new Error("expired")));
+      const res = await fetch(`${base}/secured`, { headers: { Authorization: "t0k" } });
+      expect(res.status).toBe(401);
+    });
+
+    it("creates the verifier from the environment on start", async () => {
+      const verify = vi.fn().mockResolvedValue({ sub: "u1" });
+      tokens.createTokenVerifier.mockReturnValue(verify);
+      const base = await listen();
+
+      const res = await fetch(`${base}/secured`, { headers: { Authorization: "t0k" } });
+
+      expect(res.status).toBe(201);
+      expect(tokens.createTokenVerifier).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns 401 when no verifier is configured", async () => {
+      const base = await listen();
+      const res = await fetch(`${base}/secured`, { headers: { Authorization: "t0k" } });
+      expect(res.status).toBe(401);
+    });
+
+    it("logs which routes need a token", async () => {
+      await listen(vi.fn());
+      expect(console.log).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        "START",
+        "GET /secured -> Secured (auth)"
+      );
+    });
   });
 
   it("returns 500 when a handler throws", async () => {
@@ -222,6 +307,7 @@ describe("dev server", () => {
 
     server = await start();
 
+    expect(tokens.createTokenVerifier).not.toHaveBeenCalled();
     expect(fs.readFileSync).toHaveBeenCalledWith(
       join(__dirname, "..", "..", "serverless.yml"),
       "utf-8"

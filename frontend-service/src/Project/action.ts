@@ -1,4 +1,4 @@
-import { API_URL } from "../config";
+import { apiFetch } from "../api";
 import { responseErrorMessage } from "../validation";
 
 export const projectAction = async ({ request }: { request: Request }) => {
@@ -9,8 +9,8 @@ export const projectAction = async ({ request }: { request: Request }) => {
       const name = formData.get("name");
       const description = formData.get("description");
 
-      const response = await fetch(
-        `${API_URL}/project`,
+      const response = await apiFetch(
+        `/project`,
         {
           method: "POST",
           body: JSON.stringify({ name, description }),
@@ -32,8 +32,8 @@ export const projectAction = async ({ request }: { request: Request }) => {
 
     if (action == "delete") {
       const id = formData.get("projectId");
-      const response = await fetch(
-        `${API_URL}/project/${id}`,
+      const response = await apiFetch(
+        `/project/${id}`,
         {
           method: "DELETE",
         }
@@ -47,8 +47,8 @@ export const projectAction = async ({ request }: { request: Request }) => {
       const name = formData.get("name");
       const description = formData.get("description");
 
-      const response = await fetch(
-        `${API_URL}/project/${id}`,
+      const response = await apiFetch(
+        `/project/${id}`,
         {
           method: "PUT",
           body: JSON.stringify({ name, description }),

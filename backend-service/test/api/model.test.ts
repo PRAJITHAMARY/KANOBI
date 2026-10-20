@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import {
+  BatchWriteCommand,
   DeleteCommand,
   DynamoDBDocumentClient,
+  GetCommand,
   PutCommand,
   QueryCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { apiEvent, context, parseBody, PROJECT_ID } from "../helpers";
+import { apiEvent, context, parseBody, PROJECT_ID, USER_ID } from "../helpers";
 
 const { publish } = vi.hoisted(() => ({ publish: vi.fn() }));
 
@@ -58,6 +60,8 @@ const missingIdCases = [
 
 beforeEach(() => {
   ddb.reset();
+  // The project row requireProjectOwner loads: owned by the signed-in user.
+  ddb.on(GetCommand).resolves({ Item: { pk: PK, sk: PK, ownerId: USER_ID } });
   publish.mockReset().mockResolvedValue(true);
 });
 
@@ -620,7 +624,7 @@ describe.each([
       ddb.on(UpdateCommand).resolves({});
       ddb.on(DeleteCommand).resolves({});
 
-      const res = await DeleteModel({ pathParameters: ids });
+      const res = await DeleteModel(apiEvent({ pathParameters: ids }));
 
       expect(res.statusCode).toBe(204);
       const updates = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input);
@@ -644,7 +648,7 @@ describe.each([
     it("deletes a model without relations", async () => {
       queryBySk({ ml_m1: [modelItem("m1", "User")] });
       ddb.on(DeleteCommand).resolves({});
-      expect((await DeleteModel({ pathParameters: ids })).statusCode).toBe(204);
+      expect((await DeleteModel(apiEvent({ pathParameters: ids }))).statusCode).toBe(204);
       expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
     });
 
@@ -654,12 +658,49 @@ describe.each([
 
     it.each([[{}], [{ Items: [] }]])("returns 404 when missing %#", async (result) => {
       ddb.on(QueryCommand).resolves(result);
-      expect((await DeleteModel({ pathParameters: ids })).statusCode).toBe(404);
+      expect((await DeleteModel(apiEvent({ pathParameters: ids }))).statusCode).toBe(404);
     });
 
     it("returns 500 on errors", async () => {
       ddb.on(QueryCommand).rejects(new Error("x"));
-      expect((await DeleteModel({ pathParameters: ids })).statusCode).toBe(500);
+      expect((await DeleteModel(apiEvent({ pathParameters: ids }))).statusCode).toBe(500);
     });
+  });
+
+  describe("authorization", () => {
+    const relations = { relations: [{ modelId: "m2", relationship: "one-to-one" }] };
+    const handlers = [
+      ["CreateModel", CreateModel, { name: "User", properties: [] }],
+      ["GetModels", GetModels, undefined],
+      ["GetOneModel", GetOneModel, undefined],
+      ["PutModel", PutModel, { name: "User", properties: [] }],
+      ["PutModelAPI", PutModelAPI, { apis: [{ method: "get", generate: true }] }],
+      ["CreateModelRelations", CreateModelRelations, relations],
+      ["DeleteModelRelations", DeleteModelRelations, relations],
+      ["DeleteModel", DeleteModel, undefined],
+    ] as const;
+
+    it.each(handlers)("%s returns 401 without a signed-in user", async (_n, handler, body) => {
+      const res = await handler(apiEvent({ pathParameters: ids, body, userId: null }), context);
+      expect(res.statusCode).toBe(401);
+      expect(ddb.commandCalls(QueryCommand)).toHaveLength(0);
+    });
+
+    it.each(handlers)(
+      "%s returns 404 for another user's project and changes nothing",
+      async (_n, handler, body) => {
+        ddb.on(GetCommand).resolves({ Item: { pk: PK, sk: PK, ownerId: "someone-else" } });
+        const res = await handler(apiEvent({ pathParameters: ids, body }), context);
+        expect(res.statusCode).toBe(404);
+        expect(parseBody(res).message).toBe(`Project with id: ${PROJECT_ID} Not found`);
+        expect(ddb.commandCalls(GetCommand)[0].args[0].input.Key).toEqual({ pk: PK, sk: PK });
+        expect(ddb.commandCalls(QueryCommand)).toHaveLength(0);
+        expect(ddb.commandCalls(PutCommand)).toHaveLength(0);
+        expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+        expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+        expect(ddb.commandCalls(BatchWriteCommand)).toHaveLength(0);
+        expect(publish).not.toHaveBeenCalled();
+      }
+    );
   });
 });

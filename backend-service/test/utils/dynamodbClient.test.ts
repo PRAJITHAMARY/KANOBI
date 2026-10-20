@@ -4,6 +4,7 @@ import {
   CreateTableCommand,
   DescribeTableCommand,
   DynamoDBClient,
+  UpdateTableCommand,
 } from "@aws-sdk/client-dynamodb";
 
 const dynamo = mockClient(DynamoDBClient);
@@ -60,11 +61,45 @@ describe("dynamodbClient", () => {
     });
   });
 
-  it("leaves an existing table alone", async () => {
+  it("leaves an existing table with the owner index alone", async () => {
     const { initDb } = await load("dev");
-    dynamo.on(DescribeTableCommand).resolves({});
+    dynamo.on(DescribeTableCommand).resolves({
+      Table: { GlobalSecondaryIndexes: [{ IndexName: "byOwner" }] },
+    });
     await initDb("table");
     expect(dynamo.commandCalls(CreateTableCommand)).toHaveLength(0);
+    expect(dynamo.commandCalls(UpdateTableCommand)).toHaveLength(0);
+  });
+
+  it.each([
+    ["no indexes", {}],
+    ["other indexes", { Table: { GlobalSecondaryIndexes: [{ IndexName: "other" }] } }],
+  ])("adds the owner index to an existing table with %s", async (_case, described) => {
+    const { initDb } = await load("dev");
+    dynamo.on(DescribeTableCommand).resolves(described);
+    dynamo.on(UpdateTableCommand).resolves({});
+
+    await initDb("table");
+
+    expect(dynamo.commandCalls(UpdateTableCommand)[0].args[0].input).toEqual({
+      TableName: "table",
+      AttributeDefinitions: [
+        { AttributeName: "ownerId", AttributeType: "S" },
+        { AttributeName: "pk", AttributeType: "S" },
+      ],
+      GlobalSecondaryIndexUpdates: [
+        {
+          Create: {
+            IndexName: "byOwner",
+            KeySchema: [
+              { AttributeName: "ownerId", KeyType: "HASH" },
+              { AttributeName: "pk", KeyType: "RANGE" },
+            ],
+            Projection: { ProjectionType: "ALL" },
+          },
+        },
+      ],
+    });
   });
 
   it("creates a missing table", async () => {
@@ -75,9 +110,24 @@ describe("dynamodbClient", () => {
     await initDb("table");
     expect(dynamo.commandCalls(CreateTableCommand)[0].args[0].input).toMatchObject({
       TableName: "table",
+      AttributeDefinitions: [
+        { AttributeName: "pk", AttributeType: "S" },
+        { AttributeName: "sk", AttributeType: "S" },
+        { AttributeName: "ownerId", AttributeType: "S" },
+      ],
       KeySchema: [
         { AttributeName: "pk", KeyType: "HASH" },
         { AttributeName: "sk", KeyType: "RANGE" },
+      ],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: "byOwner",
+          KeySchema: [
+            { AttributeName: "ownerId", KeyType: "HASH" },
+            { AttributeName: "pk", KeyType: "RANGE" },
+          ],
+          Projection: { ProjectionType: "ALL" },
+        },
       ],
     });
   });

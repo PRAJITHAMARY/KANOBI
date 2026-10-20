@@ -25,6 +25,8 @@ provider:
     AWS_DEPLOY_REGION: ${env:AWS_DEPLOY_REGION}
     BUCKET_NAME: ${env:BUCKET_NAME}
     region: ${env:AWS_DEPLOY_REGION}
+    # The UI origin allowed by CORS (src/utils/responseManager.ts).
+    CORS_ORIGIN: ${env:UI_ORIGIN}
     CODEBUILD_PROJECT:
       Ref: DeployProject
     CFN_EXECUTION_ROLE_ARN:
@@ -46,6 +48,11 @@ provider:
             - dynamodb:BatchWriteItem
           Resource:
             - Fn::GetAtt: [KanobiTable, Arn]
+        # Listing a user's projects (GetProjects).
+        - Effect: Allow
+          Action: dynamodb:Query
+          Resource:
+            Fn::Join: ["/", [{ Fn::GetAtt: [KanobiTable, Arn] }, "index", "byOwner"]]
         # Boilerplate, generated project sources, deploy zips and swagger files.
         - Effect: Allow
           Action:
@@ -109,161 +116,159 @@ provider:
 plugins:
   - serverless-offline
 
+custom:
+  # Shared by every HTTP function below (YAML anchors).
+  cors: &cors
+    origin: ${env:UI_ORIGIN}
+    headers:
+      - Content-Type
+      - Authorization
+    allowCredentials: false
+  cognitoAuthorizer: &cognitoAuthorizer
+    name: cognito
+    type: COGNITO_USER_POOLS
+    arn:
+      Fn::GetAtt: [CognitoUserPool, Arn]
+
 functions:
-  default:
-    handler: dist/index.ping
+  # Public: liveness check for health checks and e2e setup.
+  Health:
+    handler: dist/api/health/health.Health
     events:
       - http:
           method: GET
-          path: /
+          path: /health
+          cors: *cors
 
+  # Every other endpoint needs a Cognito ID token (Authorization header).
   GetProjects:
     handler: dist/api/project/project.GetProjects
     events:
       - http:
           method: GET
           path: /project
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   CreateProject:
     handler: dist/api/project/project.CreateProject
     events:
       - http:
           method: POST
           path: /project
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   GetOneProject:
     handler: dist/api/project/project.GetOneProject
     events:
       - http:
           method: GET
           path: /project/{id}
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   GetProjectCost:
     handler: dist/api/project/project.GetProjectCost
     events:
       - http:
           method: GET
           path: /project/cost/{id}
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   PutProject:
     handler: dist/api/project/project.PutProject
     events:
       - http:
           method: PUT
           path: /project/{id}
-          cors:
-            origin: "*"
-
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   DeleteProject:
     handler: dist/api/project/project.DeleteProject
     events:
       - http:
           method: DELETE
           path: /project/{id}
-          cors:
-            origin: "*"
-            allowCredentials: false
-
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   CreateModel:
     handler: dist/api/model/model.CreateModel
     events:
       - http:
           method: POST
           path: /model/{projectId}
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   GetModels:
     handler: dist/api/model/model.GetModels
     events:
       - http:
           method: GET
           path: /model/{projectId}
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   GetOneModel:
     handler: dist/api/model/model.GetOneModel
     events:
       - http:
           method: GET
           path: /model/{projectId}/{modelId}
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   PutModel:
     handler: dist/api/model/model.PutModel
     events:
       - http:
           method: PUT
           path: /model/{projectId}/{modelId}
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   PutModelAPI:
     handler: dist/api/model/model.PutModelAPI
     events:
       - http:
           method: PUT
           path: /model-api/{projectId}/{modelId}
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   CreateModelRelations:
     handler: dist/api/model/model.CreateModelRelations
     events:
       - http:
           method: POST
           path: /model-relations/{projectId}/{modelId}
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   DeleteModelRelations:
     handler: dist/api/model/model.DeleteModelRelations
     events:
       - http:
           method: PUT
           path: /model-relations/{projectId}/{modelId}
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   DeleteModel:
     handler: dist/api/model/model.DeleteModel
     events:
       - http:
           method: DELETE
           path: /model/{projectId}/{modelId}
-          cors:
-            origin: "*"
-            allowCredentials: false
-
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   TriggerDeployment:
     handler: dist/api/deployment/deployment.TriggerDeployment
     events:
       - http:
           method: PUT
           path: /deployment
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
   GetDeployment:
     handler: dist/api/deployment/deployment.GetDeployment
     events:
       - http:
           method: GET
           path: /deployment/{projectId}
-          cors:
-            origin: "*"
-            allowCredentials: false
+          cors: *cors
+          authorizer: *cognitoAuthorizer
 
   projectCreatedHandler:
     handler: dist/api/project/projectEvent.projectCreatedHandler
@@ -289,12 +294,83 @@ resources:
             AttributeType: S
           - AttributeName: sk
             AttributeType: S
+          - AttributeName: ownerId
+            AttributeType: S
         KeySchema:
           - AttributeName: pk
             KeyType: HASH
           - AttributeName: sk
             KeyType: RANGE
+        # A user's projects; only project rows have ownerId.
+        GlobalSecondaryIndexes:
+          - IndexName: byOwner
+            KeySchema:
+              - AttributeName: ownerId
+                KeyType: HASH
+              - AttributeName: pk
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
         BillingMode: "PAY_PER_REQUEST"
+
+    # Kanobi accounts. Users are created by an admin until self sign-up exists
+    # (issue #28). The UI signs in with USER_PASSWORD_AUTH and sends the ID token.
+    CognitoUserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: kanobi-${sls:stage}
+        UsernameAttributes:
+          - email
+        AutoVerifiedAttributes:
+          - email
+        AdminCreateUserConfig:
+          AllowAdminCreateUserOnly: true
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 12
+            RequireLowercase: true
+            RequireUppercase: true
+            RequireNumbers: true
+            RequireSymbols: false
+    CognitoUserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        ClientName: kanobi-web-${sls:stage}
+        UserPoolId:
+          Ref: CognitoUserPool
+        GenerateSecret: false
+        ExplicitAuthFlows:
+          - ALLOW_USER_PASSWORD_AUTH
+          - ALLOW_REFRESH_TOKEN_AUTH
+        PreventUserExistenceErrors: ENABLED
+        IdTokenValidity: 60
+        AccessTokenValidity: 60
+        RefreshTokenValidity: 30
+        TokenValidityUnits:
+          IdToken: minutes
+          AccessToken: minutes
+          RefreshToken: days
+
+    # API Gateway answers 401/403 itself (before any Lambda runs); without these
+    # the browser sees a CORS error instead of the status.
+    GatewayResponseDefault4XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseType: DEFAULT_4XX
+        RestApiId:
+          Ref: ApiGatewayRestApi
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'${env:UI_ORIGIN}'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+    GatewayResponseDefault5XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseType: DEFAULT_5XX
+        RestApiId:
+          Ref: ApiGatewayRestApi
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'${env:UI_ORIGIN}'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
 
     # Builds and deploys generated services (src/api/deployment/deploymentEvent.ts).
     # The source and buildspec are supplied by each StartBuild call.
@@ -499,3 +575,12 @@ resources:
                     - dynamodb:DescribeTimeToLive
                     - dynamodb:UpdateTimeToLive
                   Resource: arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/*sTable*
+
+  # Values the UI needs (VITE_COGNITO_CLIENT_ID in frontend-service/.env.production).
+  Outputs:
+    UserPoolId:
+      Value:
+        Ref: CognitoUserPool
+    UserPoolClientId:
+      Value:
+        Ref: CognitoUserPoolClient

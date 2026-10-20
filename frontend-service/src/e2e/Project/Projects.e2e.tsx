@@ -1,4 +1,5 @@
-import { expect, login, test } from "../support/fixtures";
+import { API_URL } from "../../../playwright.config";
+import { expect, login, OTHER_USER, test } from "../support/fixtures";
 
 test.describe("Projects dashboard", () => {
   test("lists existing projects", async ({ page, api, uniqueName }) => {
@@ -90,5 +91,28 @@ test.describe("Projects dashboard", () => {
         "name: Project name can only contain lowercase letters, numbers and hyphens"
       );
     }
+  });
+
+  test("users only see their own projects", async ({ page, api, otherApi, uniqueName }) => {
+    const mine = await api.createProject(uniqueName("Private"));
+    const theirs = await otherApi.createProject(uniqueName("Theirs"));
+
+    await login(page, OTHER_USER);
+    await expect(page.getByTestId("project-card").filter({ hasText: theirs.name })).toBeVisible();
+    await expect(page.getByTestId("project-card").filter({ hasText: mine.name })).toHaveCount(0);
+
+    // Another user's project looks like it doesn't exist, and can't be changed.
+    expect((await otherApi.getProject(mine.id)).status).toBe(404);
+    expect(await otherApi.findProjectsByName(mine.name)).toEqual([]);
+    expect((await api.getProject(mine.id)).status).toBe(200);
+  });
+
+  test("the API refuses requests without a valid token", async ({ request }) => {
+    expect((await request.get(`${API_URL}/project`)).status()).toBe(401);
+    const forged = await request.get(`${API_URL}/project`, {
+      headers: { Authorization: "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0." },
+    });
+    expect(forged.status()).toBe(401);
+    expect((await request.get(`${API_URL}/health`)).status()).toBe(200);
   });
 });
