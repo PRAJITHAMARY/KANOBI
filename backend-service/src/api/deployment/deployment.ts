@@ -25,6 +25,13 @@ import {
 import { StatusType } from "@aws-sdk/client-codebuild";
 import { ProjectModel } from "../project/project.dto";
 import { downloadFile, streamToString, uploadFile } from "../../utils/S3Client";
+import { findModelNameProblem, ProjectNameSchema } from "../../utils/names";
+import { CreateModel } from "../model/model.dto";
+import {
+  authErrorResponse,
+  getUserId,
+  requireProjectOwner,
+} from "../../utils/auth";
 
 export async function GetDeployment(
   event: APIGatewayProxyEvent,
@@ -35,6 +42,8 @@ export async function GetDeployment(
     if (!projectId) {
       return ResponseManager.BadRequestResponse("Project Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -159,10 +168,13 @@ export async function GetDeployment(
     return ResponseManager.OkResponse(item);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(GetDeployment.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetDeployment.name, error)
+    );
   }
 }
 
@@ -174,6 +186,8 @@ export async function TriggerDeployment(
     const body = TriggerDeploymentDtoSchema.parse(
       JSON.parse(event.body || "{}") as TriggerDeploymentDto
     );
+
+    await requireProjectOwner(body.projectId, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -200,6 +214,16 @@ export async function TriggerDeployment(
     const theProject = project.find(
       (x) => x.entityType == Keys.PROJECT_TYPE
     ) as ProjectModel;
+
+    // Rows saved before the name rules existed can hold names that are unsafe
+    // to put in a build or in generated code.
+    const nameProblem = findDeployNameProblem(
+      theProject,
+      project.filter((x) => x.entityType == Keys.MODEL_TYPE) as CreateModel[]
+    );
+    if (nameProblem) {
+      return ResponseManager.BadRequestResponse(nameProblem, nameProblem);
+    }
 
     const deploymentId = uuidv4();
 
@@ -276,9 +300,30 @@ export async function TriggerDeployment(
     return ResponseManager.OkResponse(item);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(TriggerDeployment.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(TriggerDeployment.name, error)
+    );
   }
+}
+
+function findDeployNameProblem(
+  project: ProjectModel,
+  models: CreateModel[]
+): string | undefined {
+  const projectName = ProjectNameSchema.safeParse(project.name);
+  if (!projectName.success) {
+    return `Rename the project before deploying: ${projectName.error.issues[0].message}`;
+  }
+
+  for (const model of models) {
+    const problem = findModelNameProblem(model);
+    if (problem) {
+      return `Rename model "${model.name}" before deploying: ${problem}`;
+    }
+  }
+  return undefined;
 }

@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { ProjectNameSchema } from "../../utils/names";
 
 export const CreateProjectDtoSchema = z.object({
-  name: z.string().min(3),
+  name: ProjectNameSchema,
   description: z.string().optional(),
 });
 
@@ -19,6 +20,8 @@ export const CreateProjectSchemaSchema = z.object({
   stackName: z.string().optional(),
   description: z.string().optional(),
   entityType: z.string(),
+  /** The Cognito `sub` of the user who created the project. */
+  ownerId: z.string().optional(),
 });
 
 export type CreateProjectResponseDto = z.infer<

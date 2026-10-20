@@ -12,7 +12,10 @@ if ! awslocal dynamodb describe-table --table-name "$TABLE" >/dev/null 2>&1; the
   awslocal dynamodb create-table \
     --table-name "$TABLE" \
     --attribute-definitions AttributeName=pk,AttributeType=S AttributeName=sk,AttributeType=S \
+      AttributeName=ownerId,AttributeType=S \
     --key-schema AttributeName=pk,KeyType=HASH AttributeName=sk,KeyType=RANGE \
+    --global-secondary-indexes \
+      'IndexName=byOwner,KeySchema=[{AttributeName=ownerId,KeyType=HASH},{AttributeName=pk,KeyType=RANGE}],Projection={ProjectionType=ALL}' \
     --billing-mode PAY_PER_REQUEST >/dev/null
 fi
 

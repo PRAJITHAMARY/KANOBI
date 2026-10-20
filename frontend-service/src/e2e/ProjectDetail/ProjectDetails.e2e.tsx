@@ -1,4 +1,4 @@
-import { acceptNextDialog, expect, test } from "../support/fixtures";
+import { acceptNextDialog, expect, test, login } from "../support/fixtures";
 
 // Builds and deploys the generated service to LocalStack (npm install, tsc,
 // serverless deploy), so this flow takes a few minutes.
@@ -12,6 +12,7 @@ test.describe("Project details: deployment", () => {
       { name: "title", type: "string", required: true },
       { name: "price", type: "number", required: false },
     ]);
+    await login(page);
     await page.goto(`/project/${project.id}`);
     await expect(page.getByRole("heading", { name: project.name, level: 1 })).toBeVisible();
 

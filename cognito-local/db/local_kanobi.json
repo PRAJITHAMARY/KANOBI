@@ -1,0 +1,48 @@
+{
+  "Options": {
+    "Id": "local_kanobi",
+    "Name": "kanobi-local",
+    "Arn": "arn:aws:cognito-idp:local:local:userpool/local_kanobi",
+    "UsernameAttributes": ["email"],
+    "AdminCreateUserConfig": { "AllowAdminCreateUserOnly": true },
+    "MfaConfiguration": "OFF",
+    "LambdaConfig": {},
+    "SchemaAttributes": [
+      { "Name": "sub", "AttributeDataType": "String", "Mutable": false, "Required": true },
+      { "Name": "email", "AttributeDataType": "String", "Mutable": true, "Required": false },
+      { "Name": "email_verified", "AttributeDataType": "Boolean", "Mutable": true, "Required": false }
+    ],
+    "CreationDate": "2026-10-19T00:00:00.000Z",
+    "LastModifiedDate": "2026-10-19T00:00:00.000Z"
+  },
+  "Users": {
+    "demo@kanobi.local": {
+      "Username": "demo@kanobi.local",
+      "Password": "Kanobi-demo-1",
+      "Attributes": [
+        { "Name": "sub", "Value": "00000000-0000-4000-8000-000000000001" },
+        { "Name": "email", "Value": "demo@kanobi.local" },
+        { "Name": "email_verified", "Value": "true" }
+      ],
+      "Enabled": true,
+      "UserStatus": "CONFIRMED",
+      "UserCreateDate": "2026-10-19T00:00:00.000Z",
+      "UserLastModifiedDate": "2026-10-19T00:00:00.000Z",
+      "RefreshTokens": []
+    },
+    "other@kanobi.local": {
+      "Username": "other@kanobi.local",
+      "Password": "Kanobi-other-1",
+      "Attributes": [
+        { "Name": "sub", "Value": "00000000-0000-4000-8000-000000000002" },
+        { "Name": "email", "Value": "other@kanobi.local" },
+        { "Name": "email_verified", "Value": "true" }
+      ],
+      "Enabled": true,
+      "UserStatus": "CONFIRMED",
+      "UserCreateDate": "2026-10-19T00:00:00.000Z",
+      "UserLastModifiedDate": "2026-10-19T00:00:00.000Z",
+      "RefreshTokens": []
+    }
+  }
+}

@@ -48,12 +48,12 @@ describe("Projects", () => {
     await userEvent.click(await screen.findByRole("button", { name: "New" }));
     expect(screen.getByRole("heading", { name: "New Project" })).toBeInTheDocument();
 
-    await userEvent.type(screen.getByPlaceholderText("Project name"), "Store");
+    await userEvent.type(screen.getByPlaceholderText("Project name"), "store");
     await userEvent.type(screen.getByPlaceholderText("description"), "desc");
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => expect(submissions).toHaveLength(1));
-    expect(submissions[0]).toEqual({ name: "Store", description: "desc", action: "post" });
+    expect(submissions[0]).toEqual({ name: "store", description: "desc", action: "post" });
     // The dashboard comes back one render before the effect that closes the
     // dialog runs (open state survives the loading screen), so wait for it.
     await waitFor(() =>
@@ -64,6 +64,75 @@ describe("Projects", () => {
         screen.getByRole("heading", { name: "Dashboard" })
       ).toBeInTheDocument()
     );
+  });
+
+  it("shows the name rule as a hint", async () => {
+    renderProjects();
+    await userEvent.click(await screen.findByRole("button", { name: "New" }));
+    expect(screen.getByRole("textbox", { name: "Project name" })).toHaveAccessibleDescription(
+      "Lowercase letters, numbers and hyphens, 3+ characters."
+    );
+  });
+
+  it("validates the name on blur and on submit without sending it", async () => {
+    const submissions: unknown[] = [];
+    renderProjects((fields) => {
+      submissions.push(fields);
+      return { success: true };
+    });
+
+    await userEvent.click(await screen.findByRole("button", { name: "New" }));
+    const input = screen.getByRole("textbox", { name: "Project name" });
+
+    await userEvent.type(input, "My Shop");
+    await userEvent.tab();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription(
+      "Project name can only contain lowercase letters, numbers and hyphens"
+    );
+
+    // Submitting an empty name is caught too, and nothing reaches the action.
+    await userEvent.clear(input);
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(input).toHaveAccessibleDescription("Project name must be at least 3 characters");
+    expect(submissions).toHaveLength(0);
+    expect(screen.getByRole("heading", { name: "New Project" })).toBeInTheDocument();
+
+    // Fixing the name clears the error while typing.
+    await userEvent.type(input, "my-shop");
+    expect(input).not.toHaveAttribute("aria-invalid");
+    expect(input).toHaveAccessibleDescription(
+      "Lowercase letters, numbers and hyphens, 3+ characters."
+    );
+  });
+
+  it("keeps the dialog open with the API error, and clears it when reopened", async () => {
+    renderProjects(() => ({ success: false, action: "post", error: "name: taken" }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "New" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Project name" }), "shop");
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("name: taken");
+    expect(screen.getByRole("heading", { name: "New Project" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Project name" })).toHaveValue("shop");
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "New" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Project name" })).toHaveValue("");
+  });
+
+  it("ignores errors from other project forms", async () => {
+    renderProjects(() => ({ success: false, action: "put", id: "1", error: "nope" }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "New" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Project name" }), "shop");
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await screen.findByRole("heading", { name: "New Project" });
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Project name" })).toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("closes the dialog from the ✕ and Cancel buttons", async () => {

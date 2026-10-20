@@ -13,15 +13,14 @@ import { Readable } from "stream";
 import { logError, logInfo } from "./logger";
 import { Project } from "ts-morph";
 import { createReadStream } from "fs";
+import { localEndpointConfig } from "./awsConfig";
 
 const s3 = new S3Client({
   region: process.env.AWS_DEPLOY_REGION,
-  endpoint: process.env.NODE_ENV == "dev" ? process.env.S3_ENDPOINT : undefined,
   forcePathStyle: true,
-  credentials: {
-    accessKeyId: `${process.env.AWS_KEY}`,
-    secretAccessKey: `${process.env.AWS_SECRET}`,
-  },
+  ...(process.env.NODE_ENV == "dev"
+    ? localEndpointConfig(process.env.S3_ENDPOINT)
+    : {}),
 });
 
 const BUCKET = process.env.BUCKET_NAME;

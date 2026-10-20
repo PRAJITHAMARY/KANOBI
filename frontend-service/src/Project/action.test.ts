@@ -7,13 +7,14 @@ describe("projectAction", () => {
     const fetchMock = mockFetch(jsonResponse({ data: { id: "1" } }, 201));
 
     const res = await projectAction({
-      request: formRequest({ action: "post", name: "Shop", description: "d" }),
+      request: formRequest({ action: "post", name: "shop", description: "d" }),
     });
 
     expect(res).toEqual({ success: true, data: { data: { id: "1" } } });
     expect(fetchMock).toHaveBeenCalledWith(`${API}/project`, {
       method: "POST",
-      body: JSON.stringify({ name: "Shop", description: "d" }),
+      body: JSON.stringify({ name: "shop", description: "d" }),
+      headers: { "Content-Type": "application/json" },
     });
   });
 
@@ -25,20 +26,50 @@ describe("projectAction", () => {
     });
 
     expect(res).toEqual({ success: true, data: 204 });
-    expect(fetchMock).toHaveBeenCalledWith(`${API}/project/1`, { method: "DELETE" });
+    expect(fetchMock).toHaveBeenCalledWith(`${API}/project/1`, { method: "DELETE", headers: {} });
   });
 
   it("updates a project", async () => {
     const fetchMock = mockFetch(jsonResponse({}, 200));
 
     const res = await projectAction({
-      request: formRequest({ action: "put", id: "1", name: "New", description: "d2" }),
+      request: formRequest({ action: "put", id: "1", name: "new-name", description: "d2" }),
     });
 
     expect(res).toEqual({ success: true, data: 200 });
     expect(fetchMock).toHaveBeenCalledWith(`${API}/project/1`, {
       method: "PUT",
-      body: JSON.stringify({ name: "New", description: "d2" }),
+      body: JSON.stringify({ name: "new-name", description: "d2" }),
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  it("returns the API error when creating fails", async () => {
+    mockFetch(jsonResponse({ message: "name: Project name must be at least 3 characters" }, 400));
+
+    const res = await projectAction({
+      request: formRequest({ action: "post", name: "ab", description: "" }),
+    });
+
+    expect(res).toEqual({
+      success: false,
+      action: "post",
+      error: "name: Project name must be at least 3 characters",
+    });
+  });
+
+  it("returns the API error when updating fails", async () => {
+    mockFetch(new Response("oops", { status: 500 }));
+
+    const res = await projectAction({
+      request: formRequest({ action: "put", id: "1", name: "shop", description: "" }),
+    });
+
+    expect(res).toEqual({
+      success: false,
+      action: "put",
+      id: "1",
+      error: "Request failed (500)",
     });
   });
 
@@ -52,7 +83,7 @@ describe("projectAction", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 
     await expect(
-      projectAction({ request: formRequest({ action: "post", name: "Shop" }) })
+      projectAction({ request: formRequest({ action: "post", name: "shop" }) })
     ).resolves.toBeUndefined();
     expect(alert).toHaveBeenCalledWith("offline");
   });

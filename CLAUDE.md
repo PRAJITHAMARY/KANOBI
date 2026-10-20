@@ -41,14 +41,15 @@ Frontend (`cd frontend-service`):
 `docker compose up --build` from the repo root starts:
 - **localstack (:4566):** S3, DynamoDB, CloudFormation, Lambda, API Gateway, and others. `localstack/init/seed.sh` creates `KanobiTable` and the `kanobi-local` bucket and syncs `backend-service/boilerplate/` to `s3://kanobi-local/boilerplate/` on every start.
 - **backend (:3000):** `src/local/devServer.ts`, a small HTTP server that maps the `http` events in `serverless.yml` to the compiled handlers. It doesn't use `sls offline`, because Serverless v4 needs a login. It runs with `NODE_ENV=dev` and `DEPLOY_TARGET=localstack`, and `src/` is live-reloaded.
-- **frontend (:5173):** Vite with `VITE_API_URL=http://localhost:3000`.
+- **cognito (:9229):** [cognito-local](https://github.com/jagregory/cognito-local), the local stand-in for the Cognito user pool. It copies the committed seed in `cognito-local/` (pool `local_kanobi`, client `kanobilocalwebclient`, users `demo@kanobi.local` / `Kanobi-demo-1` and `other@kanobi.local` / `Kanobi-other-1`) on start.
+- **frontend (:5173):** Vite with `VITE_API_URL=http://localhost:3000` and the cognito-local endpoint and client.
 
 How `DEPLOY_TARGET=localstack` changes behaviour (`src/utils/awsConfig.ts`):
 - Deploys run in `src/utils/localBuildRunner.ts` inside the backend container instead of CodeBuild. It follows the buildspec steps and adds `serverless-localstack` to the project's `serverless.yml`.
 - The runner deploys with `serverless@3` to LocalStack and keeps build state and logs in S3 under `builds/<id>.json`.
 - CloudFormation and API Gateway clients use `AWS_ENDPOINT`, and the cost endpoints return 0.
 
-Newer LocalStack images need `LOCALSTACK_AUTH_TOKEN`. The compose file defaults to a pinned 4.x community image; override it with `LOCALSTACK_IMAGE` and `LOCALSTACK_AUTH_TOKEN` in a root `.env` (see `.env.example`). LocalStack runs Lambdas as sibling containers through the mounted Docker socket.
+Newer LocalStack images need `LOCALSTACK_AUTH_TOKEN`. The compose file defaults to a pinned 4.x community image; override it with `LOCALSTACK_IMAGE` and `LOCALSTACK_AUTH_TOKEN` in a root `.env` (copy `.env.docker.example`). LocalStack runs Lambdas as sibling containers through the mounted Docker socket.
 
 Without Docker, run `npm run start:local` in `backend-service` against your own LocalStack, with the env vars from `docker-compose.yml`.
 
@@ -77,6 +78,13 @@ CI (`.github/workflows/ci.yml`) runs on pushes to `main`, on PRs and on manual r
 
 Coverage reports are uploaded as artifacts. A coverage threshold failure fails the job.
 
+A fourth CI job, **Workflow scripts**, runs `node --test` with 100% coverage thresholds over `.github/scripts/*.test.js`. Scripts that workflows run go in `.github/scripts/`, with a test file next to each one.
+
+**Wiki update issues** (`.github/workflows/wiki-update-issues.yml`): when a PR is merged into `main`, it opens an issue (label `documentation`) listing the [wiki](https://github.com/NdubuisiJr/Kanobi/wiki) pages to review. It does this only when the change is significant: a key file changed, source files were added, removed or renamed, or at least 50 documented lines changed. The path → page rules are in `.github/scripts/wiki-impact.js`. When you add a source area or a wiki page, update `RULES` there along with its tests.
+- **Trigger:** `pull_request_target`, so fork PRs can open issues too. It never checks out PR code.
+- **Opt out:** the `skip-wiki` label, or `[skip wiki]` in the PR description.
+- **Manual runs:** `workflow_dispatch` takes `pr_number`, and `dry_run` writes the issue to the job summary instead of opening it.
+
 ### Testing rules (mandatory)
 
 Coverage must stay at 100% in both packages, and every user-facing feature needs an e2e flow. Treat these as part of the definition of done for any change:
@@ -85,7 +93,7 @@ Coverage must stay at 100% in both packages, and every user-facing feature needs
 2. **Run `npm run test:coverage` in each package you touched before you call the work done**, and make sure it passes. In the backend, also run `npm run typecheck`. A threshold failure is a failing build: fix it by adding tests, never by lowering thresholds, widening `coverage.exclude`, or deleting tests.
 3. **Cover behaviour, not just lines.** For each branch, test both outcomes: success and failure paths, validation errors (400), not-found (404), unexpected errors (500), empty and missing data, and optional fields present and absent. Assert on outputs and side effects (response body, DynamoDB/S3 command inputs, published events, rendered UI, fetch calls), not just that code ran.
 4. **`v8 ignore` hints are a last resort.** Use one only for code that genuinely can't be reached (e.g. a guard the UI or types make impossible). Add a comment explaining why and, if the unreachability points to a bug, an entry in `TODO.md`. Never use a hint to skip code that is merely hard to test; refactor it or mock the dependency instead.
-5. **Bug fixes start with a test.** Write a test that reproduces the bug (it fails first), then fix it. If the bug is listed in `TODO.md`, update the test that documents the old behaviour and tick off or remove the entry.
+5. **Bug fixes start with a test.** Write a test that reproduces the bug (it fails first), then fix it. If the bug is listed in `TODO.md`, update the test that documents the old behaviour and remove the entry (don't tick it: the issue and PR record what was fixed).
 6. **Keep tests isolated and deterministic.** In unit tests, no real network or AWS calls: mock SDK clients with `aws-sdk-client-mock`/`vi.mock`, and stub `fetch` and globals with `vi.stubGlobal`. Use fake timers or `vi.setSystemTime` for time-dependent code, and temp directories for filesystem work. Reset mocks and env stubs between tests (`restoreMocks` is on; call `vi.unstubAllEnvs()`/`vi.unstubAllGlobals()` where you stub).
 7. **Where tests go:**
    - Backend tests go in `backend-service/test/` at the same relative path as the source (`src/utils/foo.ts` → `test/utils/foo.test.ts`).
@@ -117,15 +125,21 @@ Coverage must stay at 100% in both packages, and every user-facing feature needs
 1. `backend-service/boilerplate/` is the template for generated services. At runtime it is read from the **S3 bucket** (`BUCKET_NAME`) under the `boilerplate/` prefix, not from local disk, so local edits to it take effect only after you upload it to the bucket.
 2. `projectCreatedHandler` copies `boilerplate/` to `<projectId>/` in S3. It uses ts-morph to produce `src/index.ts` from the imports in `indexTemplate.ts`. It also rewrites the generated `serverless.yml` (service name from `getServiceName`, a per-project files bucket, IAM statements, `Service`/`Project` tags used for cost lookup).
 3. `modelCreated/Updated/DeletedHandler` (`modelEvent.ts`) use `src/utils/codeBuilder.ts`, which clones the generic handlers from `indexTemplate.ts` (`Getone`, `Get`, `Post`, …) into `index.ts` as `<Method><ModelName>` functions via ts-morph. They also add or remove matching `functions` entries and per-model DynamoDB tables (`getTableName`) in the project's `serverless.yml`, then upload both files back to S3.
-4. `deploymentTriggeredHandler` downloads `<projectId>/` from S3 (to `./.downloads` in dev, `/tmp` otherwise), zips it, uploads the zip, and starts the CodeBuild project `sls-code-deploy` with an inline buildspec (build, `docs.js` swagger generation, `sls deploy --stage prod`). `deployment.ts` reads the deployment status back through CodeBuild/CloudWatch logs and exports Swagger from API Gateway (`src/utils/infraHelper.ts`).
+4. `deploymentTriggeredHandler` downloads `<projectId>/` from S3 (to `./.downloads` in dev, `/tmp` otherwise), zips it, uploads the zip, and starts the CodeBuild project `kanobi-deploy-<stage>` (`CODEBUILD_PROJECT`, defined in `serverless.yml`) with an inline buildspec (build, `docs.js` swagger generation, `sls deploy --stage prod`). `deployment.ts` reads the deployment status back through CodeBuild/CloudWatch logs and exports Swagger from API Gateway (`src/utils/infraHelper.ts`).
 5. Deleting a project deletes its S3 folder and the CloudFormation stack (it empties the stack's buckets first).
 
-**Environment.** Variables are read from `.env` (`useDotenv`, gitignored; copy `backend-service/.env.example`): `NODE_ENV`, `SERVICE_TABLE`, `DYNAMODB_ENDPOINT`, `S3_ENDPOINT`, `AWS_DEPLOY_REGION`, `AWS_KEY`, `AWS_SECRET`, `BUCKET_NAME`. With `NODE_ENV=dev`, the DynamoDB and S3 clients use the local endpoints. AWS calls such as CodeBuild, CloudFormation and Cost Explorer still go to real AWS.
+**Environment.** Variables are read from `.env` (`useDotenv`, gitignored; copy `backend-service/.env.example`): `NODE_ENV`, `SERVICE_TABLE`, `DYNAMODB_ENDPOINT`, `S3_ENDPOINT`, `AWS_DEPLOY_REGION`, `BUCKET_NAME`, plus `CODEBUILD_PROJECT` and `CFN_EXECUTION_ROLE_ARN` (set from `serverless.yml` resources when deployed). With `NODE_ENV=dev`, the DynamoDB and S3 clients use the local endpoints. AWS calls such as CodeBuild, CloudFormation and Cost Explorer still go to real AWS.
 
-Responses go through `ResponseManager` (`src/utils/responseManager.ts`), and logging goes through `logInfo`/`logError` (`src/utils/logger.ts`).
+**Credentials and IAM.** There are no static AWS keys. Clients for real AWS get no `credentials`, so the SDK's default chain resolves the Lambda execution role (or your profile locally). Clients pointed at a local emulator get dummy `test`/`test` credentials (`localEndpointConfig` in `src/utils/awsConfig.ts`). The control-plane role in `serverless.yml` lists only the actions and resources the code uses, so a new AWS call needs a matching IAM statement. Builds run as `DeployProjectRole`, and CloudFormation creates and deletes generated services' resources as `CfnExecutionRole` (`provider.iam.deploymentRole`, set in `projectEvent.ts`).
+
+**Auth and ownership.** Every HTTP function except `Health` has the Cognito authorizer (`custom.cognitoAuthorizer` in `serverless.yml`); the local dev server verifies the ID token itself (`src/local/tokenVerifier.ts`, configured by `COGNITO_ISSUER`, `COGNITO_JWKS_URI`, `COGNITO_CLIENT_ID`). Handlers read the user with `getUserId(event)` and check projects with `requireProjectOwner(projectId, userId)` (`src/utils/auth.ts`), mapping errors with `authErrorResponse`. Project rows carry `ownerId`, and `GetProjects` queries the `byOwner` index. Handler tests get a signed-in user from `apiEvent()` by default (`userId: null` for none) and need the project row mocked with `GetCommand`.
+
+Responses go through `ResponseManager` (`src/utils/responseManager.ts`), and logging goes through `logInfo`/`logError` (`src/utils/logger.ts`). CORS allows `CORS_ORIGIN` (any origin when unset).
 
 ## Frontend architecture
 
 **UI redesign:** the screens are in the [Project Kanobi Figma file](https://www.figma.com/design/K9vwhf5Vuc2hg0BYLznZRS/Project-Kanobi), with a local gitignored export in `figma-screenshot/`. Before building or changing any screen, read `DESIGN.md`, which overrides the designs where they're inconsistent or show features Kanobi doesn't have. It defines the app shell, the `StatusPill` variants, the real endpoint and response formats, and what to hide until the backend supports it. Update `DESIGN.md` in the same change when a hidden feature gets built.
 
-Routes are defined in `src/main.tsx` with `createBrowserRouter`. Each page folder (`Login/`, `Project/`, `ProjectDetail/`) pairs a component with `loader.ts`/`action.ts`, and data fetching and mutations happen in those files, not in components. Actions dispatch on a hidden `action` form field (`post`/`put`/`delete`). The backend base URL is `API_URL` (`src/config.ts`), read from `VITE_API_URL`: `.env.development` (localhost:3000), `.env.production` (the staging API Gateway endpoint), or `.env.test`. Login is a hardcoded client-side check.
+Routes are defined in `src/main.tsx` with `createBrowserRouter`. Each page folder (`Login/`, `Project/`, `ProjectDetail/`) pairs a component with `loader.ts`/`action.ts`, and data fetching and mutations happen in those files, not in components. Actions dispatch on a hidden `action` form field (`post`/`put`/`delete`). The backend base URL is `API_URL` (`src/config.ts`), read from `VITE_API_URL`: `.env.development` (localhost:3000), `.env.production` (the staging API Gateway endpoint), or `.env.test`.
+
+**Auth.** Sign in (`src/auth.ts`) calls Cognito's `InitiateAuth` (`USER_PASSWORD_AUTH`) at `VITE_COGNITO_ENDPOINT` with `VITE_COGNITO_CLIENT_ID`, and keeps the session in `sessionStorage`. Call the API only through `apiFetch` (`src/api.ts`), which sends the ID token, renews it once on a 401, and otherwise signs out and opens `/?expired=1`. Signed-in pages are children of the `Layout` route, whose loader (`requireAuth`) redirects to Sign in with `redirectTo`. In unit tests, put a session in `sessionStorage` (`kanobi.session`) to assert the `Authorization` header; in e2e, sign in with `login(page)` and use the `api`/`otherApi` fixtures, which act as the two seeded users.

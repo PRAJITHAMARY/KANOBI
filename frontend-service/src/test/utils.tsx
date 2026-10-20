@@ -7,6 +7,7 @@ import {
 import { vi } from "vitest";
 
 export const API = "http://api.test";
+export const COGNITO = "http://cognito.test/";
 
 export const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {

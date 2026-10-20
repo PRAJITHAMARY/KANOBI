@@ -1,15 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { projectsLoader } from "./loader";
 import { API, jsonResponse, mockFetch } from "../test/utils";
 
 describe("projectsLoader", () => {
-  it("fetches the project list", async () => {
+  afterEach(() => sessionStorage.clear());
+
+  it("fetches the signed-in user's project list", async () => {
+    sessionStorage.setItem(
+      "kanobi.session",
+      JSON.stringify({ email: "a", idToken: "id-1", refreshToken: "r" })
+    );
     const fetchMock = mockFetch(jsonResponse({ data: [{ id: "1" }] }));
 
     await expect(projectsLoader()).resolves.toEqual({
       projects: { data: [{ id: "1" }] },
     });
-    expect(fetchMock).toHaveBeenCalledWith(`${API}/project`);
+    expect(fetchMock).toHaveBeenCalledWith(`${API}/project`, {
+      headers: { Authorization: "id-1" },
+    });
   });
 
   it("alerts when the request fails", async () => {

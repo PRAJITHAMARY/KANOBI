@@ -155,8 +155,26 @@ describe("adding and deleting models", () => {
     await userEvent.type(screen.getByPlaceholderText("Model name"), "Order");
     await userEvent.click(screen.getByRole("button", { name: "Add Model" }));
 
-    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(await screen.findByRole("alert")).toHaveTextContent("error");
     expect(screen.getByPlaceholderText("Model name")).toHaveValue("Order");
+  });
+
+  it.each([
+    ["order", "Model name must be PascalCase: start with a capital letter, then letters and numbers only"],
+    ["Order Item", "Model name must be PascalCase: start with a capital letter, then letters and numbers only"],
+    ["POST", "Model name is already used"],
+  ])("explains why %j can't be added", async (name, message) => {
+    const fetchMock = stubFetch();
+    renderManager();
+    const input = screen.getByRole("textbox", { name: "New model name" });
+    expect(input).toHaveAccessibleDescription("PascalCase, e.g. Product or OrderItem.");
+
+    await userEvent.type(input, name);
+
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription(message);
+    expect(screen.getByRole("button", { name: "Add Model" })).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("removes a deleted model", async () => {
@@ -167,7 +185,7 @@ describe("adding and deleting models", () => {
 
     await waitFor(() => expect(screen.getAllByPlaceholderText("Model Name")).toHaveLength(2));
     expect(screen.queryByText("No relationship defined")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(`${API}/model/p1/m2`, { method: "DELETE" });
+    expect(fetchMock).toHaveBeenCalledWith(`${API}/model/p1/m2`, { method: "DELETE", headers: {} });
     expect(screen.getByDisplayValue("User")).toBeInTheDocument();
   });
 
@@ -253,6 +271,53 @@ describe("editing a model", () => {
   });
 });
 
+describe("validating a model", () => {
+  it("shows a row error for an invalid or duplicate model name and blocks saving", async () => {
+    const { card } = renderManager();
+    const user = within(card("User"));
+    const name = user.getByPlaceholderText("Model Name");
+
+    fireEvent.change(name, { target: { value: "user account" } });
+    expect(name).toHaveAccessibleDescription(
+      "Model name must be PascalCase: start with a capital letter, then letters and numbers only"
+    );
+    expect(user.getByRole("button", { name: "Push Update" })).toBeDisabled();
+
+    fireEvent.change(name, { target: { value: "Post" } });
+    expect(name).toHaveAccessibleDescription("Model name is already used");
+    expect(user.getByRole("button", { name: "Push Update" })).toBeDisabled();
+
+    fireEvent.change(name, { target: { value: "Member" } });
+    expect(name).not.toHaveAttribute("aria-invalid");
+    expect(user.getByRole("button", { name: "Push Update" })).toBeEnabled();
+  });
+
+  it("shows a row error for an invalid or duplicate field name and blocks saving", async () => {
+    const { card } = renderManager();
+    const user = within(card("User"));
+
+    await userEvent.click(user.getByRole("button", { name: "+ Add Property" }));
+    const [email, , added] = user.getAllByPlaceholderText("Property name");
+    expect(added).toHaveAccessibleDescription("Field name is required");
+    expect(user.getByRole("button", { name: "Push Update" })).toBeDisabled();
+
+    fireEvent.change(added, { target: { value: "Email" } });
+    expect(added).toHaveAccessibleDescription(
+      "Field name must be camelCase: start with a lowercase letter, then letters and numbers only"
+    );
+
+    // Both rows of a case-insensitive duplicate are flagged.
+    fireEvent.change(added, { target: { value: "eMail" } });
+    expect(added).toHaveAccessibleDescription("Field name is already used");
+    expect(email).toHaveAccessibleDescription("Field name is already used");
+
+    fireEvent.change(added, { target: { value: "nickname" } });
+    expect(added).not.toHaveAttribute("aria-invalid");
+    expect(email).not.toHaveAttribute("aria-invalid");
+    expect(user.getByRole("button", { name: "Push Update" })).toBeEnabled();
+  });
+});
+
 describe("saving changes", () => {
   it("pushes the model, its APIs and its relations, then reloads", async () => {
     const fetchMock = stubFetch();
@@ -286,11 +351,12 @@ describe("saving changes", () => {
     const tag = within(card("Tag"));
 
     await userEvent.click(tag.getByRole("button", { name: "+ Add Property" }));
+    fireEvent.change(tag.getByPlaceholderText("Property name"), { target: { value: "label" } });
     await userEvent.click(tag.getByRole("button", { name: "Push Update" }));
 
     await waitFor(() => expect(reload).toHaveBeenCalled());
     expect(sentBody(fetchMock, `${API}/model/p1/m3`, "PUT").properties).toEqual([
-      { name: "", type: "string", required: false },
+      { name: "label", type: "string", required: false },
     ]);
     expect(sentBody(fetchMock, `${API}/model-relations/p1/m3`, "POST")).toEqual({
       relations: [],
@@ -309,8 +375,10 @@ describe("saving changes", () => {
     await userEvent.click(user.getByRole("button", { name: "Push Update" }));
 
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    expect(await user.findByRole("alert")).toHaveTextContent("error");
     expect(reload).not.toHaveBeenCalled();
     expect(user.getByRole("button", { name: "Push Update" })).toBeEnabled();
+    expect(within(card("Post")).queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("deletes a relationship and reloads", async () => {
@@ -348,13 +416,13 @@ describe("saving changes", () => {
     expect(sentBody(fetchMock, `${API}/deployment`, "PUT")).toEqual({ projectId: "p1" });
   });
 
-  it("does nothing when the redeploy request fails", async () => {
+  it("shows why the redeploy request failed", async () => {
     stubFetch([{ method: "PUT", url: `${API}/deployment`, ok: false }]);
     renderManager();
 
     await userEvent.click(screen.getByRole("button", { name: "Deploy changes" }));
 
-    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(await screen.findByRole("alert")).toHaveTextContent("error");
     expect(alert).not.toHaveBeenCalled();
     expect(reload).not.toHaveBeenCalled();
   });

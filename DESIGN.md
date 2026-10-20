@@ -21,7 +21,7 @@ The designs show several variants of the sidebar and header. Use one:
 - **Logo:** the blue "stacked layers" mark plus the word "Kanobi", everywhere, including the auth screens (the designs also use a terminal icon and a cube). No "BaaS" badge.
 - **Sidebar:**
   - nav items **Projects**, **Settings**, **Docs**
-  - user card at the bottom: name, email, and a menu with Sign out
+  - user card at the bottom: name, email, and a menu with Sign out (until the shell is built, a header bar shows the email and a Sign out button)
   - inside a project, a **project switcher** above the nav (the "PROJECT / Shop API" variant)
   - no workspace or org switcher (`acme-production`): workspaces don't exist
   - don't add a "WORKSPACE" section label; it wraps as "WORKSP / ACE" in two designs
@@ -62,7 +62,7 @@ Use sentence case ("Deploying"), never uppercase ("IN PROGRESS").
 
 ### 1.5 Forms, modals and validation
 
-- **Button order:** primary action on the **right**, Cancel to its left as a visible secondary button with `type="button"` (see the "Cancel buttons submit their forms" bug in `TODO.md`). The New project design has them left-aligned.
+- **Button order:** primary action on the **right**, Cancel to its left as a visible secondary button with `type="button"` (the "Cancel buttons submit their forms" bug in `TODO.md` is fixed in the current dialogs). The New project design has them left-aligned.
 - **Validation timing:** show field errors on **blur or submit**, not while the user is typing. Exception: type-to-confirm inputs stay neutral and keep the action button disabled until the value matches (the Delete modal design shows a red error mid-typing).
 - **Form-level errors** (e.g. bad credentials): a neutral-red banner above the fields, in the regular UI font, with no single field highlighted.
 - **Modals:** close with ✕, Escape and Cancel. The backdrop shows the real underlying page (the designs show unrelated mock dashboards behind the modals).
@@ -113,13 +113,15 @@ Each section lists what to build and where to deviate from the design.
 
 ### Sign in (Figma: `Kanobi - Sign In (Light)`)
 
-- **No backend accounts yet** (`TODO.md` → Accounts). Until they exist, build the Sign in layout around the current login, and **hide**:
+- **Accounts exist** (Cognito), but only sign-in: users are created by an admin until sign-up is built (#28). **Hide**:
   - "Forgot password?"
   - "Continue with Google/GitHub"
   - "Sign up"
   - "All systems normal"
 - **Logo:** show it once, inside the card. Remove the duplicate in the page header.
 - **Error:** "Invalid email or password" as a form-level banner (1.5), not mono, and don't highlight only the password field.
+- **Expired session:** after a session can't be renewed the user lands on `/?expired=1`; show "Your session has expired. Sign in again." above the form.
+- **After signing in:** return to the page that sent the user to Sign in (`redirectTo`), or the dashboard.
 
 ### Sign up and Email verification
 
@@ -158,7 +160,7 @@ Each section lists what to build and where to deviate from the design.
 ### New project modal (Figma: `Kanobi - New Project Modal (Light)`)
 
 - **Fields:** Project name and Description (optional). **Remove "AWS Deployment Region".**
-- **Name rule:** lowercase letters, numbers and hyphens, 3+ characters, validated client-side on blur and submit (the backend enforcement is in `TODO.md`). Show the rule as a single hint line, and drop the "3+ chars" chip that repeats it.
+- **Name rule:** lowercase letters, numbers and hyphens, 3+ characters, validated client-side on blur and submit, and enforced by the API. Show the rule as a single hint line, and drop the "3+ chars" chip that repeats it.
 - **Footer:** Cancel and Create project, right-aligned (1.5).
 
 ### Delete project modal (Figma: `Kanobi - Delete Project Modal (Light)`)

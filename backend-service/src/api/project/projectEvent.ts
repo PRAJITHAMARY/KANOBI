@@ -18,6 +18,7 @@ import {
   getResourceName,
   getServiceName,
 } from "../../utils/infraHelper";
+import { deploymentRoleArn } from "../../utils/awsConfig";
 
 export const PROJECT_CREATED = "project created";
 export const PROJECT_DELETED = "project deleted";
@@ -53,7 +54,7 @@ export const projectCreatedHandler = async (payload: ProjectCreatedPayload) => {
     logInfo(projectCreatedHandler.name, "Created project!");
     return true;
   } catch (error) {
-    logError(projectDeletedHandler.name, error);
+    logError(projectCreatedHandler.name, error);
   }
 };
 
@@ -65,7 +66,7 @@ export const projectDeletedHandler = async (payload: ProjectDeletedPayload) => {
     logInfo(projectDeletedHandler.name, "Deleted project!");
     return true;
   } catch (error) {
-    logError(projectCreatedHandler.name, error);
+    logError(projectDeletedHandler.name, error);
   }
 };
 
@@ -81,6 +82,9 @@ async function UpdateServiceAndStackName(
   doc.service = serviceName;
   doc.provider.stackName = `${serviceName}-formation`;
   doc.provider.region = process.env.AWS_DEPLOY_REGION;
+  // CloudFormation creates and deletes the service's resources with this role.
+  const deploymentRole = deploymentRoleArn();
+  if (deploymentRole) doc.provider.iam.deploymentRole = deploymentRole;
   environment["AWS_DEPLOY_REGION"] = process.env.AWS_DEPLOY_REGION;
   let resources = doc.resources.Resources;
   let statements = doc.provider.iam.role.statements;

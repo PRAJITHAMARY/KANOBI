@@ -2,18 +2,30 @@ import { Form, Link, useActionData, useSubmit } from "react-router";
 import { X, ClipboardPen } from "lucide-react";
 import { useEffect, useState } from "react";
 import Dialog from "./Dialog";
+import FormBanner from "./FormBanner";
+import ProjectNameField from "./ProjectNameField";
+import { useProjectNameField } from "./useProjectNameField";
 
 export default function ProjectCard({ project }: { project: any }) {
   const [open, setOpen] = useState(false);
   const [openEdit, setOpenEdit] = useState(false);
-  const [name, setName] = useState(project.name);
+  const name = useProjectNameField(project.name);
   const [description, setDescription] = useState(project.description);
+  const [serverError, setServerError] = useState<string>();
   const submit = useSubmit();
   const actionData = useActionData();
 
   useEffect(() => {
     if (actionData?.success) setOpenEdit(false);
-  }, [actionData]);
+    else if (actionData?.action === "put" && actionData.id === project.id)
+      setServerError(actionData.error);
+  }, [actionData, project.id]);
+
+  const openEditDialog = () => {
+    name.reset();
+    setServerError(undefined);
+    setOpenEdit(true);
+  };
 
   return (
     <div
@@ -25,7 +37,7 @@ export default function ProjectCard({ project }: { project: any }) {
           role="button"
           aria-label="Edit project"
           className="text-blue-500 ml-auto cursor-pointer"
-          onClick={() => setOpenEdit(true)}
+          onClick={openEditDialog}
         />
         <X
           role="button"
@@ -77,13 +89,20 @@ export default function ProjectCard({ project }: { project: any }) {
         onClose={() => setOpenEdit(false)}
         title="Edit Project"
       >
-        <Form action="/project" method="post">
-          <input
-            className="border p-2 rounded w-full mb-2 placeholder:text-white"
-            placeholder="Project name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            name="name"
+        <Form
+          action="/project"
+          method="post"
+          noValidate
+          onSubmit={(e) => {
+            if (!name.validate()) e.preventDefault();
+          }}
+        >
+          <FormBanner message={serverError} />
+          <ProjectNameField
+            value={name.value}
+            error={name.error}
+            onChange={name.onChange}
+            onBlur={name.onBlur}
           />
           <input
             className="border p-2 rounded w-full mb-4 placeholder:text-white"
@@ -103,6 +122,7 @@ export default function ProjectCard({ project }: { project: any }) {
             Update
           </button>
           <button
+            type="button"
             onClick={() => setOpenEdit(false)}
             className="mt-4 ml-5 bg-red-500 text-white px-3 py-1 rounded"
           >

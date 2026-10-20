@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import {
+  BatchWriteCommand,
   DeleteCommand,
   DynamoDBDocumentClient,
+  GetCommand,
   PutCommand,
   QueryCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { apiEvent, context, parseBody, PROJECT_ID } from "../helpers";
+import { apiEvent, context, parseBody, PROJECT_ID, USER_ID } from "../helpers";
 
 const { publish } = vi.hoisted(() => ({ publish: vi.fn() }));
 
@@ -58,6 +60,8 @@ const missingIdCases = [
 
 beforeEach(() => {
   ddb.reset();
+  // The project row requireProjectOwner loads: owned by the signed-in user.
+  ddb.on(GetCommand).resolves({ Item: { pk: PK, sk: PK, ownerId: USER_ID } });
   publish.mockReset().mockResolvedValue(true);
 });
 
@@ -131,6 +135,59 @@ describe.each([
       );
       expect(res.statusCode).toBe(400);
       expect(parseBody(res).data).toBe("Model already exists in project");
+    });
+
+    it("treats names that differ only in case as duplicates", async () => {
+      ddb.on(QueryCommand).resolves({ Items: [modelItem("m0", "USER")] });
+      const res = await CreateModel(
+        apiEvent({ body, pathParameters: { projectId: PROJECT_ID } }),
+        context
+      );
+      expect(res.statusCode).toBe(400);
+      expect(parseBody(res).message).toBe("A model named USER already exists");
+      expect(ddb.commandCalls(PutCommand)).toHaveLength(0);
+    });
+
+    it.each([
+      [{ ...body, name: "user" }, "name: Model name must be PascalCase"],
+      [{ ...body, name: "User*/ x" }, "name: Model name must be PascalCase"],
+      [
+        { ...body, properties: [{ name: "e: 1\n", type: "string", required: true }] },
+        "properties.0.name: Field name must be camelCase",
+      ],
+      [
+        { ...body, properties: [{ name: "email", type: "object", required: true }] },
+        "properties.0.type: Field type must be one of string, number, boolean",
+      ],
+    ])("rejects unsafe names and types %#", async (badBody, message) => {
+      const res = await CreateModel(
+        apiEvent({ body: badBody, pathParameters: { projectId: PROJECT_ID } }),
+        context
+      );
+      expect(res.statusCode).toBe(400);
+      expect(parseBody(res).message).toContain(message);
+      expect(ddb.calls()).toHaveLength(0);
+      expect(publish).not.toHaveBeenCalled();
+    });
+
+    it("rejects property names that differ only in case", async () => {
+      const res = await CreateModel(
+        apiEvent({
+          body: {
+            name: "User",
+            properties: [
+              { name: "email", type: "string", required: true },
+              { name: "eMail", type: "string", required: true },
+            ],
+          },
+          pathParameters: { projectId: PROJECT_ID },
+        }),
+        context
+      );
+      expect(res.statusCode).toBe(400);
+      expect(parseBody(res).message).toBe(
+        "properties: Duplicate property names are not allowed."
+      );
     });
 
     it("rejects duplicate property names", async () => {
@@ -303,6 +360,50 @@ describe.each([
       ddb.on(UpdateCommand).rejects(new Error("x"));
       const res = await handler(apiEvent({ pathParameters: ids, body: validBody }), context);
       expect(res.statusCode).toBe(500);
+    });
+  });
+
+  describe("PutModel renames", () => {
+    const rename = (name: string) =>
+      PutModel(
+        apiEvent({
+          pathParameters: ids,
+          body: { name, properties: [{ name: "a", type: "string", required: true }] },
+        }),
+        context
+      );
+
+    it("rejects a rename onto another model's name in any case", async () => {
+      ddb.on(QueryCommand).resolves({
+        Items: [modelItem("m1", "User"), modelItem("m2", "Post")],
+      });
+      const res = await rename("POST");
+      expect(res.statusCode).toBe(400);
+      expect(parseBody(res).message).toBe("A model named Post already exists");
+      expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+      expect(publish).not.toHaveBeenCalled();
+      expect(ddb.commandCalls(QueryCommand)[0].args[0].input).toMatchObject({
+        TableName: tableEnv,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: { ":pk": PK },
+      });
+    });
+
+    it("ignores the model's own row and non-model rows", async () => {
+      // Fresh rows per call: the handler mutates the items it returns.
+      ddb.on(QueryCommand).callsFake(() => ({
+        Items: [{ pk: PK, sk: PK, entityType: "Project", name: "Account" }, modelItem("m1", "User")],
+      }));
+      ddb.on(UpdateCommand).resolves({});
+      expect((await rename("USER")).statusCode).toBe(200);
+      expect((await rename("Account")).statusCode).toBe(200);
+    });
+
+    it("rejects an unsafe name before touching the table", async () => {
+      const res = await rename("User; rm -rf /");
+      expect(res.statusCode).toBe(400);
+      expect(parseBody(res).message).toContain("Model name must be PascalCase");
+      expect(ddb.calls()).toHaveLength(0);
     });
   });
 
@@ -523,7 +624,7 @@ describe.each([
       ddb.on(UpdateCommand).resolves({});
       ddb.on(DeleteCommand).resolves({});
 
-      const res = await DeleteModel({ pathParameters: ids });
+      const res = await DeleteModel(apiEvent({ pathParameters: ids }));
 
       expect(res.statusCode).toBe(204);
       const updates = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input);
@@ -547,7 +648,7 @@ describe.each([
     it("deletes a model without relations", async () => {
       queryBySk({ ml_m1: [modelItem("m1", "User")] });
       ddb.on(DeleteCommand).resolves({});
-      expect((await DeleteModel({ pathParameters: ids })).statusCode).toBe(204);
+      expect((await DeleteModel(apiEvent({ pathParameters: ids }))).statusCode).toBe(204);
       expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
     });
 
@@ -557,12 +658,49 @@ describe.each([
 
     it.each([[{}], [{ Items: [] }]])("returns 404 when missing %#", async (result) => {
       ddb.on(QueryCommand).resolves(result);
-      expect((await DeleteModel({ pathParameters: ids })).statusCode).toBe(404);
+      expect((await DeleteModel(apiEvent({ pathParameters: ids }))).statusCode).toBe(404);
     });
 
     it("returns 500 on errors", async () => {
       ddb.on(QueryCommand).rejects(new Error("x"));
-      expect((await DeleteModel({ pathParameters: ids })).statusCode).toBe(500);
+      expect((await DeleteModel(apiEvent({ pathParameters: ids }))).statusCode).toBe(500);
     });
+  });
+
+  describe("authorization", () => {
+    const relations = { relations: [{ modelId: "m2", relationship: "one-to-one" }] };
+    const handlers = [
+      ["CreateModel", CreateModel, { name: "User", properties: [] }],
+      ["GetModels", GetModels, undefined],
+      ["GetOneModel", GetOneModel, undefined],
+      ["PutModel", PutModel, { name: "User", properties: [] }],
+      ["PutModelAPI", PutModelAPI, { apis: [{ method: "get", generate: true }] }],
+      ["CreateModelRelations", CreateModelRelations, relations],
+      ["DeleteModelRelations", DeleteModelRelations, relations],
+      ["DeleteModel", DeleteModel, undefined],
+    ] as const;
+
+    it.each(handlers)("%s returns 401 without a signed-in user", async (_n, handler, body) => {
+      const res = await handler(apiEvent({ pathParameters: ids, body, userId: null }), context);
+      expect(res.statusCode).toBe(401);
+      expect(ddb.commandCalls(QueryCommand)).toHaveLength(0);
+    });
+
+    it.each(handlers)(
+      "%s returns 404 for another user's project and changes nothing",
+      async (_n, handler, body) => {
+        ddb.on(GetCommand).resolves({ Item: { pk: PK, sk: PK, ownerId: "someone-else" } });
+        const res = await handler(apiEvent({ pathParameters: ids, body }), context);
+        expect(res.statusCode).toBe(404);
+        expect(parseBody(res).message).toBe(`Project with id: ${PROJECT_ID} Not found`);
+        expect(ddb.commandCalls(GetCommand)[0].args[0].input.Key).toEqual({ pk: PK, sk: PK });
+        expect(ddb.commandCalls(QueryCommand)).toHaveLength(0);
+        expect(ddb.commandCalls(PutCommand)).toHaveLength(0);
+        expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+        expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+        expect(ddb.commandCalls(BatchWriteCommand)).toHaveLength(0);
+        expect(publish).not.toHaveBeenCalled();
+      }
+    );
   });
 });

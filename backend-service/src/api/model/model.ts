@@ -25,6 +25,12 @@ import {
   relationships,
 } from "./model.dto";
 import { ResponseManager } from "../../utils/responseManager";
+import { sameName } from "../../utils/names";
+import {
+  authErrorResponse,
+  getUserId,
+  requireProjectOwner,
+} from "../../utils/auth";
 import { Keys } from "../../utils/keys";
 import {
   MODEL_CREATED,
@@ -49,6 +55,8 @@ export async function CreateModel(
       return ResponseManager.BadRequestResponse("Project Id must be valid");
     }
 
+    await requireProjectOwner(projectId, getUserId(event));
+
     const result = await docClient.send(
       new QueryCommand({
         TableName: process.env.SERVICE_TABLE,
@@ -68,12 +76,13 @@ export async function CreateModel(
     }
 
     const existingModel = project.find(
-      (x) => x.entityType == Keys.MODEL_TYPE && x.name == body.name
+      (x) => x.entityType == Keys.MODEL_TYPE && sameName(x.name, body.name)
     );
 
     if (existingModel) {
       return ResponseManager.BadRequestResponse(
-        "Model already exists in project"
+        "Model already exists in project",
+        `A model named ${existingModel.name} already exists`
       );
     }
 
@@ -118,10 +127,13 @@ export async function CreateModel(
     return ResponseManager.CreatedResponse(item);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(CreateModel.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(CreateModel.name, error)
+    );
   }
 }
 
@@ -134,6 +146,8 @@ export async function GetModels(
     if (!projectId) {
       return ResponseManager.BadRequestResponse("Project Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -159,7 +173,10 @@ export async function GetModels(
       count: result.Count,
     });
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }
 
@@ -177,6 +194,8 @@ export async function GetOneModel(
     if (!modelId) {
       return ResponseManager.BadRequestResponse("Model Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -200,7 +219,10 @@ export async function GetOneModel(
 
     return ResponseManager.OkResponse(model);
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }
 
@@ -223,6 +245,32 @@ export async function PutModel(
       JSON.parse(event.body || "{}") as Omit<CreateModelDto, "id">
     );
 
+    await requireProjectOwner(projectId, getUserId(event));
+
+    const projectItems = await docClient.send(
+      new QueryCommand({
+        TableName: process.env.SERVICE_TABLE,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: {
+          ":pk": Keys.PROJECT + projectId,
+        },
+      })
+    );
+
+    const clash = projectItems.Items?.find(
+      (x) =>
+        x.entityType == Keys.MODEL_TYPE &&
+        x.sk != Keys.MODEL + modelId &&
+        sameName(x.name, body.name)
+    );
+
+    if (clash) {
+      return ResponseManager.BadRequestResponse(
+        "Model already exists in project",
+        `A model named ${clash.name} already exists`
+      );
+    }
+
     const {
       updateExpression,
       expressionAttributeNames,
@@ -274,10 +322,13 @@ export async function PutModel(
     return ResponseManager.OkResponse(model);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }
 
@@ -298,6 +349,8 @@ export async function PutModelAPI(
 
     const body = UpdateModelApiSchema.parse(JSON.parse(event.body || "{}"));
 
+    await requireProjectOwner(projectId, getUserId(event));
+
     const {
       updateExpression,
       expressionAttributeNames,
@@ -349,10 +402,13 @@ export async function PutModelAPI(
     return ResponseManager.OkResponse(model);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }
 
@@ -370,6 +426,8 @@ export async function CreateModelRelations(
     if (!modelId) {
       return ResponseManager.BadRequestResponse("Model Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const modelResult = await docClient.send(
       new QueryCommand({
@@ -495,10 +553,13 @@ export async function CreateModelRelations(
     return ResponseManager.OkResponse(model);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }
 
@@ -516,6 +577,8 @@ export async function DeleteModelRelations(
     if (!modelId) {
       return ResponseManager.BadRequestResponse("Model Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const modelResult = await docClient.send(
       new QueryCommand({
@@ -626,10 +689,13 @@ export async function DeleteModelRelations(
     return ResponseManager.OkResponse(model);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }
 
@@ -644,6 +710,8 @@ export async function DeleteModel(event: any): Promise<any> {
     if (!modelId) {
       return ResponseManager.BadRequestResponse("Model Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -738,6 +806,9 @@ export async function DeleteModel(event: any): Promise<any> {
 
     return ResponseManager.NoContentResponse();
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }

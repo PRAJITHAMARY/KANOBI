@@ -1,4 +1,4 @@
-import * as awsSdk from "aws-sdk";
+import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import {
   PROJECT_CREATED,
   PROJECT_DELETED,
@@ -107,23 +107,20 @@ export class LambdaEventHub implements IEventHub {
   async publish<TPayload>(
     payload: ApplicationEvent<TPayload>
   ): Promise<boolean> {
-    awsSdk.config.update({
-      region: process.env.AWS_DEPLOY_REGION,
-      accessKeyId: process.env.AWS_KEY,
-      secretAccessKey: process.env.AWS_SECRET,
-    });
     const event = this.events[payload.type];
     if (!event) {
       throw payload.type + " Event handler not found";
     }
 
-    const params = {
-      FunctionName: event.functionName,
-      Payload: JSON.stringify(payload.payload),
-      InvocationType: "Event",
-    };
-
-    const response = await new awsSdk.Lambda().invoke(params).promise();
+    // No explicit credentials: the Lambda execution role is used.
+    const lambda = new LambdaClient({ region: process.env.AWS_DEPLOY_REGION });
+    const response = await lambda.send(
+      new InvokeCommand({
+        FunctionName: event.functionName,
+        Payload: new TextEncoder().encode(JSON.stringify(payload.payload)),
+        InvocationType: "Event",
+      })
+    );
     return (
       response.FunctionError == null || response.FunctionError == undefined
     );

