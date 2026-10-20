@@ -4,3 +4,4 @@ figma-screenshot/
 
 # Snapshots and console logs from the Playwright MCP browser tool.
 .playwright-mcp/
+wiki/
