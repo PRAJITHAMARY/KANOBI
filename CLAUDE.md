@@ -49,7 +49,7 @@ How `DEPLOY_TARGET=localstack` changes behaviour (`src/utils/awsConfig.ts`):
 - The runner deploys with `serverless@3` to LocalStack and keeps build state and logs in S3 under `builds/<id>.json`.
 - CloudFormation and API Gateway clients use `AWS_ENDPOINT`, and the cost endpoints return 0.
 
-Newer LocalStack images need `LOCALSTACK_AUTH_TOKEN`. The compose file defaults to a pinned 4.x community image; override it with `LOCALSTACK_IMAGE` and `LOCALSTACK_AUTH_TOKEN` in a root `.env` (see `.env.example`). LocalStack runs Lambdas as sibling containers through the mounted Docker socket.
+Newer LocalStack images need `LOCALSTACK_AUTH_TOKEN`. The compose file defaults to a pinned 4.x community image; override it with `LOCALSTACK_IMAGE` and `LOCALSTACK_AUTH_TOKEN` in a root `.env` (copy `.env.docker.example`). LocalStack runs Lambdas as sibling containers through the mounted Docker socket.
 
 Without Docker, run `npm run start:local` in `backend-service` against your own LocalStack, with the env vars from `docker-compose.yml`.
 

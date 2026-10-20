@@ -87,7 +87,7 @@ curl "$BASE_URL/Product"
 - Infrastructure calls go to LocalStack.
 - Project cost always reports 0, because LocalStack has no Cost Explorer.
 
-**LocalStack image.** Images from 2026.03 onwards need a (free) `LOCALSTACK_AUTH_TOKEN`. The compose file pins `localstack/localstack:4.14`, which runs without one. To use a newer image, copy [.env.example](.env.example) to `.env` and set `LOCALSTACK_IMAGE` and `LOCALSTACK_AUTH_TOKEN`.
+**LocalStack image.** Images from 2026.03 onwards need a (free) `LOCALSTACK_AUTH_TOKEN`. The compose file pins `localstack/localstack:4.14`, which runs without one. To use a newer image, copy [.env.docker.example](.env.docker.example) to `.env` and set `LOCALSTACK_IMAGE` and `LOCALSTACK_AUTH_TOKEN`.
 
 Stop everything with `docker compose down -v`.
 
