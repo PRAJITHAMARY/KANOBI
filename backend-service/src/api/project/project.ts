@@ -1,9 +1,7 @@
 import "reflect-metadata";
 import {
   PutCommand,
-  ScanCommand,
   UpdateCommand,
-  DeleteCommand,
   QueryCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../../utils/dynamodbClient";
@@ -37,12 +35,30 @@ import {
   getStackCurrentCost,
   getStackMonthlyCost,
 } from "../../utils/infraHelper";
+import {
+  authErrorResponse,
+  getUserId,
+  requireProjectOwner,
+} from "../../utils/auth";
+
+/** GSI listing a user's projects (ownerId, pk). */
+export const OWNER_INDEX = "byOwner";
+
+/** Cost Explorer is billed per request, so a project's cost is cached this long. */
+export const COST_CACHE_MS = 60 * 60 * 1000;
+
+/** A project row as returned by the API, without internal fields. */
+const toProjectResponse = (item: Record<string, any>) => {
+  const { ownerId, cost, ...rest } = item;
+  return sanitizeData<CreateProjectResponseDto>(rest);
+};
 
 export async function CreateProject(
   event: APIGatewayProxyEvent,
   context: Context
 ): Promise<any> {
   try {
+    const ownerId = getUserId(event);
     const body = CreateProjectDtoSchema.parse(
       JSON.parse(event.body || "{}") as CreateProjectDto
     );
@@ -52,6 +68,7 @@ export async function CreateProject(
       pk: Keys.PROJECT + id,
       sk: Keys.PROJECT + id,
       entityType: Keys.PROJECT_TYPE,
+      ownerId,
       ...body,
     };
 
@@ -74,7 +91,10 @@ export async function CreateProject(
       return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(CreateProject.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(CreateProject.name, error)
+    );
   }
 }
 
@@ -83,30 +103,28 @@ export async function GetProjects(
   context: Context
 ): Promise<any> {
   try {
+    const ownerId = getUserId(event);
+    const nextPageToken = event.queryStringParameters?.nextPageToken;
+
+    // Only project rows carry ownerId, so the index holds nothing else.
     const result = await docClient.send(
-      new ScanCommand({
+      new QueryCommand({
         TableName: process.env.SERVICE_TABLE ?? "",
+        IndexName: OWNER_INDEX,
+        KeyConditionExpression: "ownerId = :ownerId",
+        ExpressionAttributeValues: { ":ownerId": ownerId },
         Limit: Number(event.queryStringParameters?.take) || 20,
-        FilterExpression: "entityType = :type",
-        ExpressionAttributeValues: {
-          ":type": Keys.PROJECT_TYPE,
-        },
-        ExclusiveStartKey: event.queryStringParameters?.nextPageToken
-          ? ({
-              pk: Keys.PROJECT + event.queryStringParameters.nextPageToken,
-              sk: Keys.PROJECT + event.queryStringParameters.nextPageToken,
-            } as Record<string, any>)
+        ExclusiveStartKey: nextPageToken
+          ? {
+              ownerId,
+              pk: Keys.PROJECT + nextPageToken,
+              sk: Keys.PROJECT + nextPageToken,
+            }
           : undefined,
       })
     );
 
-    if (!result.Items || result.Items.length < 1) {
-      result.Items = [];
-    }
-
-    const response = result.Items.map((x) =>
-      sanitizeData<CreateProjectResponseDto>(x)
-    );
+    const response = (result.Items ?? []).map(toProjectResponse);
 
     return ResponseManager.OkResponse<CreateProjectResponseDto[]>(response, {
       count: result.Count,
@@ -117,7 +135,10 @@ export async function GetProjects(
           : undefined,
     });
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetProjects.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetProjects.name, error)
+    );
   }
 }
 
@@ -127,42 +148,24 @@ export async function GetProjectCost(
 ): Promise<any> {
   try {
     const id = event.pathParameters?.id;
+    const project = await requireProjectOwner(id, getUserId(event));
 
-    const result = await docClient.send(
-      new QueryCommand({
-        TableName: process.env.SERVICE_TABLE,
-        KeyConditionExpression: "pk = :pk",
-        ExpressionAttributeValues: {
-          ":pk": Keys.PROJECT + id,
-        },
-      })
-    );
-
-    if (!result.Items || result.Items.length < 1) {
-      return ResponseManager.NotfoundResponse(
-        "Project with id: " + id + " Not found"
-      );
+    const cached = project.cost;
+    if (cached && Date.now() - Date.parse(cached.fetchedAt) < COST_CACHE_MS) {
+      return ResponseManager.OkResponse({
+        currentCost: cached.currentCost,
+        projectedCost: cached.projectedCost,
+      });
     }
 
-    const projectItem = result.Items.find(
-      (x) => x.entityType == Keys.PROJECT_TYPE
-    );
-
-    if (!projectItem) {
-      return ResponseManager.NotfoundResponse(
-        "Project with id: " + id + " Not found"
-      );
-    }
-
-    const project = sanitizeData<CreateProjectResponseDto>(projectItem);
-
-    const currentCost = await getStackCurrentCost("Project", project.id);
+    const projectId = getId(project.pk);
+    const currentCost = await getStackCurrentCost("Project", projectId);
     const projectedCost = await getStackMonthlyCost(
       "Service",
-      getServiceName(project.id)
+      getServiceName(projectId)
     );
 
-    return ResponseManager.OkResponse({
+    const cost = {
       currentCost: {
         amount: currentCost?.amount,
         currency: currentCost?.currency,
@@ -171,9 +174,26 @@ export async function GetProjectCost(
         amount: projectedCost?.amount,
         currency: projectedCost?.currency,
       },
-    });
+    };
+
+    await docClient.send(
+      new UpdateCommand({
+        TableName: process.env.SERVICE_TABLE ?? "",
+        Key: { pk: project.pk, sk: project.sk },
+        UpdateExpression: "set #cost = :cost",
+        ExpressionAttributeNames: { "#cost": "cost" },
+        ExpressionAttributeValues: {
+          ":cost": { ...cost, fetchedAt: new Date().toISOString() },
+        },
+      })
+    );
+
+    return ResponseManager.OkResponse(cost);
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetProjectCost.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetProjectCost.name, error)
+    );
   }
 }
 
@@ -183,6 +203,7 @@ export async function GetOneProject(
 ): Promise<any> {
   try {
     const id = event.pathParameters?.id;
+    await requireProjectOwner(id, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -209,7 +230,7 @@ export async function GetOneProject(
         "Project with id: " + id + " Not found"
       );
     }
-    const project = sanitizeData<CreateProjectResponseDto>(projectItem);
+    const project = toProjectResponse(projectItem);
 
     const models = result.Items.filter(
       (x) => x.entityType == Keys.MODEL_TYPE
@@ -220,7 +241,10 @@ export async function GetOneProject(
       models: models,
     });
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetProjects.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetProjects.name, error)
+    );
   }
 }
 
@@ -230,9 +254,13 @@ export async function PutProject(
 ): Promise<any> {
   try {
     const id = event.pathParameters?.id;
+    const userId = getUserId(event);
     const body = CreateProjectDtoSchema.parse(
       JSON.parse(event.body || "{}") as Omit<CreateProjectDto, "id">
     );
+
+    // Also stops an update from creating a row for an unknown id.
+    await requireProjectOwner(id, userId);
 
     const {
       updateExpression,
@@ -258,13 +286,17 @@ export async function PutProject(
       return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(GetProjects.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetProjects.name, error)
+    );
   }
 }
 
 export async function DeleteProject(event: any): Promise<any> {
   try {
     const id = event.pathParameters?.id;
+    await requireProjectOwner(id, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -333,6 +365,9 @@ export async function DeleteProject(event: any): Promise<any> {
 
     return ResponseManager.NoContentResponse();
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetProjects.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetProjects.name, error)
+    );
   }
 }

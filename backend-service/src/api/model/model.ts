@@ -26,6 +26,11 @@ import {
 } from "./model.dto";
 import { ResponseManager } from "../../utils/responseManager";
 import { sameName } from "../../utils/names";
+import {
+  authErrorResponse,
+  getUserId,
+  requireProjectOwner,
+} from "../../utils/auth";
 import { Keys } from "../../utils/keys";
 import {
   MODEL_CREATED,
@@ -49,6 +54,8 @@ export async function CreateModel(
     if (!projectId) {
       return ResponseManager.BadRequestResponse("Project Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -123,7 +130,10 @@ export async function CreateModel(
       return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(CreateModel.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(CreateModel.name, error)
+    );
   }
 }
 
@@ -136,6 +146,8 @@ export async function GetModels(
     if (!projectId) {
       return ResponseManager.BadRequestResponse("Project Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -161,7 +173,10 @@ export async function GetModels(
       count: result.Count,
     });
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }
 
@@ -179,6 +194,8 @@ export async function GetOneModel(
     if (!modelId) {
       return ResponseManager.BadRequestResponse("Model Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -202,7 +219,10 @@ export async function GetOneModel(
 
     return ResponseManager.OkResponse(model);
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }
 
@@ -224,6 +244,8 @@ export async function PutModel(
     const body = CreateModelDtoSchema.parse(
       JSON.parse(event.body || "{}") as Omit<CreateModelDto, "id">
     );
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const projectItems = await docClient.send(
       new QueryCommand({
@@ -303,7 +325,10 @@ export async function PutModel(
       return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }
 
@@ -323,6 +348,8 @@ export async function PutModelAPI(
     }
 
     const body = UpdateModelApiSchema.parse(JSON.parse(event.body || "{}"));
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const {
       updateExpression,
@@ -378,7 +405,10 @@ export async function PutModelAPI(
       return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }
 
@@ -396,6 +426,8 @@ export async function CreateModelRelations(
     if (!modelId) {
       return ResponseManager.BadRequestResponse("Model Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const modelResult = await docClient.send(
       new QueryCommand({
@@ -524,7 +556,10 @@ export async function CreateModelRelations(
       return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }
 
@@ -542,6 +577,8 @@ export async function DeleteModelRelations(
     if (!modelId) {
       return ResponseManager.BadRequestResponse("Model Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const modelResult = await docClient.send(
       new QueryCommand({
@@ -655,7 +692,10 @@ export async function DeleteModelRelations(
       return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }
 
@@ -670,6 +710,8 @@ export async function DeleteModel(event: any): Promise<any> {
     if (!modelId) {
       return ResponseManager.BadRequestResponse("Model Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -764,6 +806,9 @@ export async function DeleteModel(event: any): Promise<any> {
 
     return ResponseManager.NoContentResponse();
   } catch (error) {
-    return ResponseManager.InternalErrorResponse(GetModels.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetModels.name, error)
+    );
   }
 }

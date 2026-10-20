@@ -2,6 +2,8 @@
 
 interface ImportMetaEnv {
   readonly VITE_API_URL: string;
+  readonly VITE_COGNITO_ENDPOINT: string;
+  readonly VITE_COGNITO_CLIENT_ID: string;
 }
 
 interface ImportMeta {

@@ -1,0 +1,13 @@
+{
+  "Clients": {
+    "kanobilocalwebclient": {
+      "ClientId": "kanobilocalwebclient",
+      "ClientName": "kanobi-web",
+      "ExplicitAuthFlows": ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"],
+      "TokenValidityUnits": { "AccessToken": "hours", "IdToken": "minutes", "RefreshToken": "days" },
+      "UserPoolId": "local_kanobi",
+      "CreationDate": "2026-10-19T00:00:00.000Z",
+      "LastModifiedDate": "2026-10-19T00:00:00.000Z"
+    }
+  }
+}

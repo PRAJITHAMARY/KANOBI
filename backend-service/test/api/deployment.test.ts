@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import {
   DynamoDBDocumentClient,
+  GetCommand,
   PutCommand,
   QueryCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { z } from "zod";
-import { apiEvent, context, parseBody, streamOf } from "../helpers";
+import { apiEvent, context, parseBody, streamOf, USER_ID } from "../helpers";
 
 const { publish, fetchBuildLogs, fetchApiGatewayDetails, downloadFile } = vi.hoisted(
   () => ({
@@ -59,6 +60,8 @@ const swagger = () =>
 
 beforeEach(() => {
   ddb.reset();
+  // The project row requireProjectOwner loads: owned by the signed-in user.
+  ddb.on(GetCommand).resolves({ Item: { pk: "pr_p1", sk: "pr_p1", ownerId: USER_ID } });
   publish.mockReset().mockResolvedValue(true);
   fetchBuildLogs.mockReset();
   fetchApiGatewayDetails.mockReset();
@@ -376,5 +379,31 @@ describe.each([
       ddb.on(QueryCommand).rejects(new Error("x"));
       expect((await TriggerDeployment(event, context)).statusCode).toBe(500);
     });
+  });
+
+  describe("authorization", () => {
+    const cases = [
+      ["GetDeployment", GetDeployment, apiEvent({ pathParameters: { projectId: "p1" } })],
+      ["TriggerDeployment", TriggerDeployment, apiEvent({ body: { projectId: "p1" } })],
+    ] as const;
+
+    it.each(cases)("%s returns 401 without a signed-in user", async (_n, handler, event) => {
+      const res = await handler({ ...event, requestContext: {} } as any, context);
+      expect(res.statusCode).toBe(401);
+      expect(ddb.commandCalls(QueryCommand)).toHaveLength(0);
+    });
+
+    it.each(cases)(
+      "%s returns 404 for another user's project without reading logs or deploying",
+      async (_n, handler, event) => {
+        ddb.on(GetCommand).resolves({ Item: { pk: "pr_p1", sk: "pr_p1", ownerId: "other" } });
+        const res = await handler(event, context);
+        expect(res.statusCode).toBe(404);
+        expect(ddb.commandCalls(QueryCommand)).toHaveLength(0);
+        expect(ddb.commandCalls(PutCommand)).toHaveLength(0);
+        expect(fetchBuildLogs).not.toHaveBeenCalled();
+        expect(publish).not.toHaveBeenCalled();
+      }
+    );
   });
 });

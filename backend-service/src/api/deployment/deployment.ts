@@ -27,6 +27,11 @@ import { ProjectModel } from "../project/project.dto";
 import { downloadFile, streamToString, uploadFile } from "../../utils/S3Client";
 import { findModelNameProblem, ProjectNameSchema } from "../../utils/names";
 import { CreateModel } from "../model/model.dto";
+import {
+  authErrorResponse,
+  getUserId,
+  requireProjectOwner,
+} from "../../utils/auth";
 
 export async function GetDeployment(
   event: APIGatewayProxyEvent,
@@ -37,6 +42,8 @@ export async function GetDeployment(
     if (!projectId) {
       return ResponseManager.BadRequestResponse("Project Id must be valid");
     }
+
+    await requireProjectOwner(projectId, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -164,7 +171,10 @@ export async function GetDeployment(
       return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(GetDeployment.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(GetDeployment.name, error)
+    );
   }
 }
 
@@ -176,6 +186,8 @@ export async function TriggerDeployment(
     const body = TriggerDeploymentDtoSchema.parse(
       JSON.parse(event.body || "{}") as TriggerDeploymentDto
     );
+
+    await requireProjectOwner(body.projectId, getUserId(event));
 
     const result = await docClient.send(
       new QueryCommand({
@@ -291,7 +303,10 @@ export async function TriggerDeployment(
       return ResponseManager.ValidationErrorResponse(error);
     }
 
-    return ResponseManager.InternalErrorResponse(TriggerDeployment.name, error);
+    return (
+      authErrorResponse(error) ??
+      ResponseManager.InternalErrorResponse(TriggerDeployment.name, error)
+    );
   }
 }
 

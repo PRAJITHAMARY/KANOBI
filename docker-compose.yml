@@ -1,6 +1,7 @@
-# Local Kanobi environment: LocalStack (AWS), the control-plane API and the UI.
+# Local Kanobi environment: LocalStack (AWS), cognito-local (sign-in), the
+# control-plane API and the UI.
 #   docker compose up --build
-#   UI:  http://localhost:5173 (admin / password)
+#   UI:  http://localhost:5173 (demo@kanobi.local / Kanobi-demo-1)
 #   API: http://localhost:3000
 # Projects are deployed to LocalStack by the local build runner instead of CodeBuild.
 
@@ -34,6 +35,24 @@ services:
       timeout: 10s
       retries: 30
 
+  # Stand-in for the Cognito user pool. The committed seed (cognito-local/) has a
+  # fixed pool and app client and two users: demo@kanobi.local / Kanobi-demo-1 and
+  # other@kanobi.local / Kanobi-other-1. It is copied in on start, so sign-ins
+  # (which store refresh tokens) never modify the committed files.
+  cognito:
+    image: jagregory/cognito-local:3-latest
+    ports:
+      - "9229:9229"
+    entrypoint: ["sh", "-c", "mkdir -p /app/.cognito && cp -r /seed/. /app/.cognito/ && exec node /app/start.js"]
+    volumes:
+      - ./cognito-local:/seed:ro
+    healthcheck:
+      # The image's Node predates fetch, so this uses the http module.
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:9229/local_kanobi/.well-known/jwks.json', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
   backend:
     build: ./backend-service
     ports:
@@ -48,6 +67,12 @@ services:
       DYNAMODB_ENDPOINT: http://localstack:4566
       S3_ENDPOINT: http://localstack:4566
       AWS_ENDPOINT: http://localstack:4566
+      # Tokens are issued for localhost (what the browser uses); keys come from
+      # cognito-local over the compose network.
+      COGNITO_ISSUER: http://localhost:9229/local_kanobi
+      COGNITO_JWKS_URI: http://cognito:9229/local_kanobi/.well-known/jwks.json
+      COGNITO_CLIENT_ID: kanobilocalwebclient
+      CORS_ORIGIN: http://localhost:5173
     # Live reload: recompile src/ on change and restart the server.
     command: sh -c "npx tsc -w --preserveWatchOutput & node --watch dist/local/index.js"
     volumes:
@@ -55,13 +80,15 @@ services:
       - ./backend-service/serverless.yml:/app/serverless.yml:ro
     # Healthy once the API answers (also used by `docker compose up --wait` in e2e).
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/project').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
       interval: 5s
       timeout: 5s
       retries: 60
       start_period: 20s
     depends_on:
       localstack:
+        condition: service_healthy
+      cognito:
         condition: service_healthy
 
   frontend:
@@ -70,6 +97,8 @@ services:
       - "5173:5173"
     environment:
       VITE_API_URL: http://localhost:3000
+      VITE_COGNITO_ENDPOINT: http://localhost:9229/
+      VITE_COGNITO_CLIENT_ID: kanobilocalwebclient
       # File watching through Windows/macOS bind mounts needs polling.
       CHOKIDAR_USEPOLLING: "true"
     volumes:

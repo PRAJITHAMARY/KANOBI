@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ResponseManager } from "../../src/utils/responseManager";
 import { parseBody } from "../helpers";
@@ -6,7 +6,7 @@ import { parseBody } from "../helpers";
 const corsHeaders = {
   "Content-Type": "application/json",
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type,Authorization",
   "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE",
 };
 
@@ -122,6 +122,22 @@ describe("ResponseManager", () => {
       const result = z.string().refine(() => false, "bad value").safeParse("x");
       const res = ResponseManager.ValidationErrorResponse(result.error as z.ZodError);
       expect(parseBody(res).message).toBe("bad value");
+    });
+  });
+
+  describe("CORS origin", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("allows only CORS_ORIGIN when it is set", () => {
+      vi.stubEnv("CORS_ORIGIN", "https://app.kanobi.dev");
+      expect(ResponseManager.OkResponse({}).headers["Access-Control-Allow-Origin"]).toBe(
+        "https://app.kanobi.dev"
+      );
+    });
+
+    it("allows any origin when CORS_ORIGIN is unset or empty", () => {
+      vi.stubEnv("CORS_ORIGIN", "");
+      expect(ResponseManager.NoContentResponse().headers["Access-Control-Allow-Origin"]).toBe("*");
     });
   });
 });

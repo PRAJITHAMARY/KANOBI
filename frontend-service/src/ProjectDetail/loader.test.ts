@@ -13,7 +13,10 @@ describe("projectDetailLoader", () => {
       project: { id: "1", name: "Shop" },
       deployment: { buildStatus: "SUCCEEDED" },
     });
-    expect(fetchMock.mock.calls).toEqual([[`${API}/project/1`], [`${API}/deployment/1`]]);
+    expect(fetchMock.mock.calls).toEqual([
+      [`${API}/project/1`, { headers: {} }],
+      [`${API}/deployment/1`, { headers: {} }],
+    ]);
   });
 
   it("redirects back to the list when the project is missing", async () => {

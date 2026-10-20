@@ -5,6 +5,9 @@ import { defineConfig, devices } from "@playwright/test";
 // already running, and tears it down again afterwards.
 export const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:5173";
 export const API_URL = process.env.E2E_API_URL ?? "http://localhost:3000";
+// cognito-local from docker-compose.yml and its seeded app client.
+export const COGNITO_URL = process.env.E2E_COGNITO_URL ?? "http://localhost:9229/";
+export const COGNITO_CLIENT_ID = process.env.E2E_COGNITO_CLIENT_ID ?? "kanobilocalwebclient";
 
 const CI = !!process.env.CI;
 

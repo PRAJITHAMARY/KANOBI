@@ -14,6 +14,7 @@ describe("projectAction", () => {
     expect(fetchMock).toHaveBeenCalledWith(`${API}/project`, {
       method: "POST",
       body: JSON.stringify({ name: "shop", description: "d" }),
+      headers: { "Content-Type": "application/json" },
     });
   });
 
@@ -25,7 +26,7 @@ describe("projectAction", () => {
     });
 
     expect(res).toEqual({ success: true, data: 204 });
-    expect(fetchMock).toHaveBeenCalledWith(`${API}/project/1`, { method: "DELETE" });
+    expect(fetchMock).toHaveBeenCalledWith(`${API}/project/1`, { method: "DELETE", headers: {} });
   });
 
   it("updates a project", async () => {
@@ -39,6 +40,7 @@ describe("projectAction", () => {
     expect(fetchMock).toHaveBeenCalledWith(`${API}/project/1`, {
       method: "PUT",
       body: JSON.stringify({ name: "new-name", description: "d2" }),
+      headers: { "Content-Type": "application/json" },
     });
   });
 

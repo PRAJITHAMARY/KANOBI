@@ -1,8 +1,9 @@
-import { expect, test } from "../support/fixtures";
+import { expect, test, login } from "../support/fixtures";
 
 test.describe("Model manager", () => {
   test("adds a model to a project", async ({ page, api, uniqueName }) => {
     const project = await api.createProject(uniqueName("Models"));
+    await login(page);
     await page.goto(`/project/${project.id}`);
 
     await page.getByPlaceholder("Model name", { exact: true }).fill("Customer");
@@ -23,6 +24,7 @@ test.describe("Model manager", () => {
   test("defines properties and APIs, then pushes the update", async ({ page, api, uniqueName }) => {
     const project = await api.createProject(uniqueName("Props"));
     await api.createModel(project.id, "Order");
+    await login(page);
     await page.goto(`/project/${project.id}`);
 
     const card = page.getByTestId("model-card");
@@ -52,6 +54,7 @@ test.describe("Model manager", () => {
   test("deletes a model", async ({ page, api, uniqueName }) => {
     const project = await api.createProject(uniqueName("DelModel"));
     await api.createModel(project.id, "Invoice");
+    await login(page);
     await page.goto(`/project/${project.id}`);
 
     const card = page.getByTestId("model-card");
@@ -65,6 +68,7 @@ test.describe("Model manager", () => {
   test("explains invalid and duplicate names and saves nothing", async ({ page, api, uniqueName }) => {
     const project = await api.createProject(uniqueName("BadNames"));
     await api.createModel(project.id, "Order", [{ name: "total", type: "number", required: true }]);
+    await login(page);
     await page.goto(`/project/${project.id}`);
 
     const newName = page.getByRole("textbox", { name: "New model name" });
