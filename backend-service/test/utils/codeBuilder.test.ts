@@ -33,6 +33,26 @@ const docsOf = (target: ReturnType<typeof setup>["target"], name: string) =>
     .join("\n");
 
 describe("SetupAPIFunction", () => {
+  it.each([
+    [userModel({ name: "User */ export const x = 1; /*" }), "Model name must be PascalCase"],
+    [
+      userModel({ properties: [{ name: "x:\n  evil", type: "string", required: true }] }),
+      "Field name must be camelCase",
+    ],
+    [
+      userModel({ properties: [{ name: "email", type: "string\n- y", required: true }] }),
+      "Field type must be one of",
+    ],
+  ])("refuses to generate code from unsafe names %#", async (model, message) => {
+    const { template, target, functions } = setup();
+
+    await expect(
+      SetupAPIFunction(template, target, model, functions, PROJECT_ID)
+    ).rejects.toThrow(message);
+    expect(functions).toEqual({});
+    expect(target.getFunctions()).toHaveLength(0);
+  });
+
   it("generates a handler and serverless function for every enabled API", async () => {
     const { template, target, functions } = setup();
 

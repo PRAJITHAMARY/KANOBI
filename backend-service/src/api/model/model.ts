@@ -25,6 +25,7 @@ import {
   relationships,
 } from "./model.dto";
 import { ResponseManager } from "../../utils/responseManager";
+import { sameName } from "../../utils/names";
 import { Keys } from "../../utils/keys";
 import {
   MODEL_CREATED,
@@ -68,12 +69,13 @@ export async function CreateModel(
     }
 
     const existingModel = project.find(
-      (x) => x.entityType == Keys.MODEL_TYPE && x.name == body.name
+      (x) => x.entityType == Keys.MODEL_TYPE && sameName(x.name, body.name)
     );
 
     if (existingModel) {
       return ResponseManager.BadRequestResponse(
-        "Model already exists in project"
+        "Model already exists in project",
+        `A model named ${existingModel.name} already exists`
       );
     }
 
@@ -118,7 +120,7 @@ export async function CreateModel(
     return ResponseManager.CreatedResponse(item);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
     return ResponseManager.InternalErrorResponse(CreateModel.name, error);
@@ -223,6 +225,30 @@ export async function PutModel(
       JSON.parse(event.body || "{}") as Omit<CreateModelDto, "id">
     );
 
+    const projectItems = await docClient.send(
+      new QueryCommand({
+        TableName: process.env.SERVICE_TABLE,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: {
+          ":pk": Keys.PROJECT + projectId,
+        },
+      })
+    );
+
+    const clash = projectItems.Items?.find(
+      (x) =>
+        x.entityType == Keys.MODEL_TYPE &&
+        x.sk != Keys.MODEL + modelId &&
+        sameName(x.name, body.name)
+    );
+
+    if (clash) {
+      return ResponseManager.BadRequestResponse(
+        "Model already exists in project",
+        `A model named ${clash.name} already exists`
+      );
+    }
+
     const {
       updateExpression,
       expressionAttributeNames,
@@ -274,7 +300,7 @@ export async function PutModel(
     return ResponseManager.OkResponse(model);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
     return ResponseManager.InternalErrorResponse(GetModels.name, error);
@@ -349,7 +375,7 @@ export async function PutModelAPI(
     return ResponseManager.OkResponse(model);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
     return ResponseManager.InternalErrorResponse(GetModels.name, error);
@@ -495,7 +521,7 @@ export async function CreateModelRelations(
     return ResponseManager.OkResponse(model);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
     return ResponseManager.InternalErrorResponse(GetModels.name, error);
@@ -626,7 +652,7 @@ export async function DeleteModelRelations(
     return ResponseManager.OkResponse(model);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return ResponseManager.BadRequestResponse(error.errors);
+      return ResponseManager.ValidationErrorResponse(error);
     }
 
     return ResponseManager.InternalErrorResponse(GetModels.name, error);

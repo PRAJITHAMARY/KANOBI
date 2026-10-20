@@ -67,11 +67,23 @@ export class KanobiApi {
     return (await res.json()).data;
   }
 
-  /** Finds a project created through the UI and schedules it for cleanup. */
-  async trackProjectByName(name: string): Promise<Project> {
+  /** Sends a create request as-is; for checking what the API rejects. */
+  async tryCreateProject(name: string) {
+    const res = await this.request.post(`${API_URL}/project`, { data: { name } });
+    const body = await res.json();
+    if (res.ok()) this.projectIds.add(body.data.id);
+    return { status: res.status(), message: body.message as string };
+  }
+
+  async findProjectsByName(name: string): Promise<Project[]> {
     const res = await this.request.get(`${API_URL}/project?take=1000`);
     const projects = (await res.json()).data as Project[];
-    const project = projects.find((p) => p.name === name);
+    return projects.filter((p) => p.name === name);
+  }
+
+  /** Finds a project created through the UI and schedules it for cleanup. */
+  async trackProjectByName(name: string): Promise<Project> {
+    const [project] = await this.findProjectsByName(name);
     expect(project, `project "${name}" should exist`).toBeDefined();
     this.projectIds.add(project!.id);
     return project!;
@@ -87,7 +99,10 @@ export class KanobiApi {
 
 type Fixtures = {
   api: KanobiApi;
-  /** A name no other test (or earlier run) uses, e.g. "Shop w0-lq3x9a". */
+  /**
+   * A project name no other test (or earlier run) uses, e.g. "shop-w0-lq3x9a0".
+   * It follows the project name rule: lowercase letters, numbers and hyphens.
+   */
   uniqueName: (prefix: string) => string;
 };
 
@@ -102,7 +117,7 @@ export const test = base.extend<Fixtures>({
     let n = 0;
     await use(
       (prefix) =>
-        `${prefix} w${testInfo.workerIndex}-${Date.now().toString(36)}${n++}`
+        `${prefix.toLowerCase()}-w${testInfo.workerIndex}-${Date.now().toString(36)}${n++}`
     );
   },
 });

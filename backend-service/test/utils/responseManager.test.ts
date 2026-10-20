@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { ResponseManager } from "../../src/utils/responseManager";
 import { parseBody } from "../helpers";
 
@@ -81,5 +82,46 @@ describe("ResponseManager", () => {
     expect(
       parseBody(ResponseManager.InternalErrorResponse("fn", err, "custom"))
     ).toEqual({ message: "custom" });
+  });
+
+  describe("ValidationErrorResponse", () => {
+    const schema = z.object({
+      name: z.string().min(3, "too short"),
+      items: z.array(z.object({ id: z.string() })),
+    });
+    const errorOf = (input: unknown) => {
+      const result = schema.safeParse(input);
+      if (result.success) throw new Error("expected a validation error");
+      return result.error;
+    };
+
+    it("returns 400 with the issues and the first issue as the message", () => {
+      const error = errorOf({ name: "x", items: [] });
+      const res = ResponseManager.ValidationErrorResponse(error);
+      expect(res.statusCode).toBe(400);
+      expect(res.headers).toEqual(corsHeaders);
+      expect(parseBody(res)).toEqual({
+        data: JSON.parse(JSON.stringify(error.errors)),
+        message: "name: too short",
+      });
+    });
+
+    it("joins nested paths", () => {
+      const res = ResponseManager.ValidationErrorResponse(
+        errorOf({ name: "abc", items: [{ id: 1 }] })
+      );
+      expect(parseBody(res).message).toBe("items.0.id: Expected string, received number");
+    });
+
+    it("falls back to the default message when there are no issues", () => {
+      const res = ResponseManager.ValidationErrorResponse(new z.ZodError([]));
+      expect(parseBody(res)).toEqual({ data: [], message: "Bad request" });
+    });
+
+    it("omits an empty path", () => {
+      const result = z.string().refine(() => false, "bad value").safeParse("x");
+      const res = ResponseManager.ValidationErrorResponse(result.error as z.ZodError);
+      expect(parseBody(res).message).toBe("bad value");
+    });
   });
 });

@@ -20,6 +20,27 @@ test.describe("Project card", () => {
       .toBe(renamed);
   });
 
+  test("refuses an invalid new name and keeps the old one", async ({ page, api, uniqueName }) => {
+    const project = await api.createProject(uniqueName("Keepname"));
+    await login(page);
+
+    const card = page.getByTestId("project-card").filter({ hasText: project.name });
+    await card.getByRole("button", { name: "Edit project" }).click();
+    const input = page.getByRole("textbox", { name: "Project name" });
+    await input.fill("Not Valid");
+    await page.getByRole("button", { name: "Update" }).click();
+
+    await expect(input).toHaveAccessibleDescription(
+      "Project name can only contain lowercase letters, numbers and hyphens"
+    );
+    await expect(page.getByRole("heading", { name: "Edit Project" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("heading", { name: "Edit Project" })).toBeHidden();
+    await expect(card).toBeVisible();
+    expect((await api.getProject(project.id)).project.name).toBe(project.name);
+  });
+
   test("deletes a project after confirmation", async ({ page, api, uniqueName }) => {
     const project = await api.createProject(uniqueName("Doomed"));
     await login(page);

@@ -61,4 +61,37 @@ test.describe("Model manager", () => {
     await expect(card).toHaveCount(0);
     await expect.poll(async () => (await api.getModels(project.id)).length).toBe(0);
   });
+
+  test("explains invalid and duplicate names and saves nothing", async ({ page, api, uniqueName }) => {
+    const project = await api.createProject(uniqueName("BadNames"));
+    await api.createModel(project.id, "Order", [{ name: "total", type: "number", required: true }]);
+    await page.goto(`/project/${project.id}`);
+
+    const newName = page.getByRole("textbox", { name: "New model name" });
+    const add = page.getByRole("button", { name: "Add Model" });
+    await newName.fill("order item");
+    await expect(newName).toHaveAccessibleDescription(
+      "Model name must be PascalCase: start with a capital letter, then letters and numbers only"
+    );
+    await expect(add).toBeDisabled();
+    await newName.fill("ORDER");
+    await expect(newName).toHaveAccessibleDescription("Model name is already used");
+    await expect(add).toBeDisabled();
+
+    const card = page.getByTestId("model-card");
+    await card.getByRole("button", { name: "+ Add Property" }).click();
+    const added = card.getByPlaceholder("Property name").last();
+    await added.fill("Total");
+    await expect(added).toHaveAccessibleDescription(
+      "Field name must be camelCase: start with a lowercase letter, then letters and numbers only"
+    );
+    // Duplicates are case-insensitive.
+    await added.fill("tOTAL");
+    await expect(added).toHaveAccessibleDescription("Field name is already used");
+    await expect(card.getByRole("button", { name: "Push Update" })).toBeDisabled();
+
+    const models = await api.getModels(project.id);
+    expect(models.map((m) => m.name)).toEqual(["Order"]);
+    expect(models[0].properties).toEqual([{ name: "total", type: "number", required: true }]);
+  });
 });

@@ -1,20 +1,26 @@
 import { z } from "zod";
 import { ApiMethod } from "../../types";
+import {
+  ModelNameSchema,
+  PropertyNameSchema,
+  PropertyTypeSchema,
+} from "../../utils/names";
 
 export const CreateModelDtoSchema = z.object({
-  name: z.string().min(3),
+  name: ModelNameSchema,
   description: z.string().optional().default(""),
   properties: z
     .array(
       z.object({
-        name: z.string(),
-        type: z.string(),
+        name: PropertyNameSchema,
+        type: PropertyTypeSchema,
         required: z.boolean(),
       })
     )
     .refine(
       (props) => {
-        const names = props.map((p) => p.name);
+        // Case-insensitive, so near-duplicates such as "email" and "eMail" are rejected.
+        const names = props.map((p) => p.name.toLowerCase());
         return new Set(names).size === names.length;
       },
       {

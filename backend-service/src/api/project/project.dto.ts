@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { ProjectNameSchema } from "../../utils/names";
 
 export const CreateProjectDtoSchema = z.object({
-  name: z.string().min(3),
+  name: ProjectNameSchema,
   description: z.string().optional(),
 });
 

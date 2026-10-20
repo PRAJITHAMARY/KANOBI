@@ -95,6 +95,10 @@ async function TriggerBuild(
     projectName: "sls-code-deploy",
     sourceTypeOverride: "S3",
     sourceLocationOverride: `${process.env.BUCKET_NAME}/${zipKey}`,
+    // The project name is user input: pass it as data, never as buildspec text.
+    environmentVariablesOverride: [
+      { name: "PROJECT_NAME", value: projectName, type: "PLAINTEXT" },
+    ],
     buildspecOverride: `
 version: 0.2
 
@@ -115,7 +119,7 @@ phases:
     commands:
       - npm install
       - npm i --save-dev @types/node
-      - npm run build && node ./docs.js -p ${projectName}
+      - npm run build && node ./docs.js -p "$PROJECT_NAME"
       - aws s3 cp ./dist/swagger-json.json s3://${process.env.BUCKET_NAME}/${projectFolder}/swagger-json.json
       - sls deploy --stage prod
     `,

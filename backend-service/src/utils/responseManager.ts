@@ -1,3 +1,4 @@
+import { ZodError } from "zod";
 import { logError } from "./logger";
 
 export class ResponseManager {
@@ -91,6 +92,17 @@ export class ResponseManager {
         message: message,
       }),
     };
+  }
+
+  /** 400 with the zod issues as data and the first issue as a readable message. */
+  static ValidationErrorResponse(error: ZodError) {
+    const [issue] = error.errors;
+    if (!issue) return ResponseManager.BadRequestResponse(error.errors);
+    const path = issue.path.join(".");
+    return ResponseManager.BadRequestResponse(
+      error.errors,
+      path ? `${path}: ${issue.message}` : issue.message
+    );
   }
 
   static InternalErrorResponse(
